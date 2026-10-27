@@ -40,3 +40,9 @@ Stack: Vite, React 19, TypeScript, Konva (react-konva), Zustand, lz-string.
 4. Deploy.
 
 To try the production server locally: `npm run build && npm start` (http://localhost:3000).
+
+## Credits
+
+- Game data and most images: [valorant-api.com](https://valorant-api.com).
+- Corrode's Patch 13.08 minimap (`public/maps/corrode-13.08.webp`): from [ValoMapper](https://github.com/Shafin-A/ValoMapper) by Shafin Ahmed (MIT), rotated into valorant-api.com's frame. valorant-api.com still serves the pre-13.08 layout; remove the override in `src/api/valorant.ts` once it updates.
+- VALORANT and its assets are trademarks of Riot Games. This project isn't endorsed by Riot Games.

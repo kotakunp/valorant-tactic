@@ -79,6 +79,20 @@ async function getJson<T>(path: string): Promise<T> {
   return body.data;
 }
 
+/**
+ * Minimaps valorant-api.com hasn't re-exported after a layout change. Each replacement must sit in
+ * the same frame as the API image so the API's world-to-minimap transform and callouts still line up.
+ * Drop an entry once the API serves the current layout.
+ */
+const MINIMAP_OVERRIDES: Record<string, string> = {
+  // Corrode, reworked in patch 13.08. Image from ValoMapper (MIT, github.com/Shafin-A/ValoMapper), rotated into the API's frame.
+  '1c18ab1f-420d-0d8b-71d0-77ad3c439115': '/maps/corrode-13.08.webp',
+};
+
+function applyMinimapOverrides(maps: ApiMap[]): ApiMap[] {
+  return maps.map((m) => (MINIMAP_OVERRIDES[m.uuid] ? { ...m, displayIcon: MINIMAP_OVERRIDES[m.uuid] } : m));
+}
+
 export function fetchMaps(): Promise<ApiMap[]> {
   return getCached('maps', async () => {
     const raw = await getJson<any[]>('/maps');
@@ -104,7 +118,7 @@ export function fetchMaps(): Promise<ApiMap[]> {
         })),
       }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  });
+  }).then(applyMinimapOverrides);
 }
 
 export function fetchAgents(): Promise<ApiAgent[]> {
