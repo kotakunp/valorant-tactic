@@ -15,6 +15,7 @@ export interface Settings {
   showVision: boolean;
   lineOfSight: boolean;
   showSightLines: boolean;
+  showCrosshair: boolean;
 }
 
 export interface Playback {
@@ -156,6 +157,7 @@ export const usePlan = create<PlanState>()(
           showVision: true,
           lineOfSight: true,
           showSightLines: true,
+          showCrosshair: true,
         },
         library: [],
         past: [],

@@ -13,7 +13,7 @@ import { boardApi } from '../../lib/boardApi';
 import { uid } from '../../lib/ids';
 import type { AgentEl, BoardEl, PalettePayload } from '../../types';
 import { ElementNode, AGENT_RADIUS } from './nodes';
-import { castVision, collectObstacles, computeSightings, toViewer, useOccupancy } from '../../lib/vision';
+import { castAim, castVision, collectObstacles, computeSightings, toViewer, useOccupancy } from '../../lib/vision';
 
 type Draft =
   | { kind: 'pen'; points: number[] }
@@ -318,8 +318,9 @@ export default function Board() {
     const walls = settings.lineOfSight ? occupancy : null;
     const opacityById = new Map(liveFrames.map((f) => [f.el.id, f.opacity]));
 
-    const cones: { id: string; team: AgentEl['team']; x: number; y: number; range: number; points: number[]; opacity: number }[] = [];
-    if (settings.showVision) {
+    type Aim = { x: number; y: number; blocked: boolean; facing: number };
+    const cones: { id: string; team: AgentEl['team']; x: number; y: number; range: number; points: number[] | null; aim: Aim | null; opacity: number }[] = [];
+    if (settings.showVision || settings.showCrosshair) {
       const cache = coneCache.current;
       if (cache.size > 400) cache.clear();
       const obstacleKey = JSON.stringify(obstacles);
@@ -327,12 +328,17 @@ export default function Board() {
         const v = toViewer(a, map);
         if (!v) continue;
         const key = [v.x.toFixed(1), v.y.toFixed(1), v.facing.toFixed(1), v.fov, v.range.toFixed(1), !!walls, map?.uuid, obstacleKey].join('|');
-        let points = cache.get(key);
-        if (!points) {
-          points = castVision(walls, obstacles, v);
-          cache.set(key, points);
+        let points: number[] | null = null;
+        if (settings.showVision) {
+          points = cache.get(key) ?? null;
+          if (!points) {
+            points = castVision(walls, obstacles, v);
+            cache.set(key, points);
+          }
         }
-        cones.push({ id: a.id, team: a.team, x: v.x, y: v.y, range: v.range, points, opacity: opacityById.get(a.id) ?? 1 });
+        // A crosshair isn't limited by eyesight range, only by what it runs into.
+        const aim = settings.showCrosshair ? { ...castAim(walls, obstacles, v, walls ? BOARD * 1.5 : v.range), facing: v.facing } : null;
+        cones.push({ id: a.id, team: a.team, x: v.x, y: v.y, range: v.range, points, aim, opacity: opacityById.get(a.id) ?? 1 });
       }
     }
 
@@ -350,7 +356,7 @@ export default function Board() {
       return target ? [{ target, count: viewers.length }] : [];
     });
     return { cones, lines, badges };
-  }, [liveFrames, settings.showRanges, settings.lineOfSight, settings.showVision, settings.showSightLines, occupancy, map]);
+  }, [liveFrames, settings.showRanges, settings.lineOfSight, settings.showVision, settings.showCrosshair, settings.showSightLines, occupancy, map]);
 
   const ghosts = useMemo(() => {
     if (!settings.onionSkin || !prevStep || playback) return { elements: [] as BoardEl[], paths: [] as { id: string; from: BoardEl; to: BoardEl }[] };
@@ -439,7 +445,8 @@ export default function Board() {
           <Layer>
             <Group x={BOARD / 2} y={BOARD / 2} offsetX={BOARD / 2} offsetY={BOARD / 2} rotation={rot}>
               <Group listening={false}>
-                {vision.cones.map((c) => (
+                {vision.cones.map((c) =>
+                  c.points ? (
                   <Line
                     key={`cone-${c.id}`}
                     points={c.points}
@@ -454,7 +461,11 @@ export default function Board() {
                     strokeWidth={c.id === selectedId ? 1.5 : 1}
                     lineJoin="round"
                   />
-                ))}
+                  ) : null,
+                )}
+                {vision.cones.map((c) =>
+                  c.aim ? <CrosshairLine key={`aim-${c.id}`} x={c.x} y={c.y} aim={c.aim} start={agentR + 3} color={TEAM_COLORS[c.team]} opacity={c.opacity} selected={c.id === selectedId} /> : null,
+                )}
                 {vision.lines.map(({ key, from, to }) => (
                   <Line
                     key={`sight-${key}`}
@@ -617,5 +628,54 @@ export default function Board() {
       {armed && <div className="board-hint">Click the map to place · Shift+click to place several · Esc to cancel</div>}
       {playback && <div className="board-hint board-hint--live">Playing step {playback.to + 1} of {plan.steps.length}</div>}
     </div>
+  );
+}
+
+function CrosshairLine({
+  x,
+  y,
+  aim,
+  start,
+  color,
+  opacity,
+  selected,
+}: {
+  x: number;
+  y: number;
+  aim: { x: number; y: number; blocked: boolean; facing: number };
+  start: number;
+  color: string;
+  opacity: number;
+  selected: boolean;
+}) {
+  const len = Math.hypot(aim.x - x, aim.y - y);
+  if (len <= start) return null;
+  const a = (aim.facing * Math.PI) / 180;
+  const ux = Math.cos(a);
+  const uy = Math.sin(a);
+  // A Valorant-style "+" with a centre gap, turned to the aim direction.
+  const gap = 2.6;
+  const arm = 5;
+  const ticks = [
+    [ux, uy],
+    [-ux, -uy],
+    [-uy, ux],
+    [uy, -ux],
+  ].map(([dx, dy]) => [aim.x + dx * gap, aim.y + dy * gap, aim.x + dx * (gap + arm), aim.y + dy * (gap + arm)]);
+  return (
+    <Group opacity={opacity}>
+      <Line
+        points={[x + ux * start, y + uy * start, aim.x, aim.y]}
+        stroke={withAlpha(color, selected ? 1 : 0.85)}
+        strokeWidth={selected ? 1.6 : 1.2}
+        shadowColor="#000"
+        shadowBlur={2}
+        shadowOpacity={0.8}
+        lineCap="round"
+      />
+      {aim.blocked &&
+        ticks.map((pts, i) => <Line key={`o${i}`} points={pts} stroke="rgba(0,0,0,0.85)" strokeWidth={3.4} lineCap="round" />)}
+      {aim.blocked && ticks.map((pts, i) => <Line key={i} points={pts} stroke={color} strokeWidth={1.6} lineCap="round" />)}
+    </Group>
   );
 }

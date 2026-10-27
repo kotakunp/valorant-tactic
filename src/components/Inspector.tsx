@@ -340,6 +340,7 @@ export default function Inspector({ onOpenHelp }: { onOpenHelp: () => void }) {
           <Toggle label="Ability ranges" checked={settings.showRanges} onChange={(v) => a.setSettings({ showRanges: v })} />
           <Toggle label="Ghost previous step" checked={settings.onionSkin} onChange={(v) => a.setSettings({ onionSkin: v })} />
           <Toggle label="Vision cones" checked={settings.showVision} onChange={(v) => a.setSettings({ showVision: v })} />
+          <Toggle label="Crosshair lines" checked={settings.showCrosshair} onChange={(v) => a.setSettings({ showCrosshair: v })} />
           <Toggle label="Walls block vision" checked={settings.lineOfSight} onChange={(v) => a.setSettings({ lineOfSight: v })} />
           <Toggle label="Sight lines & crossfire" checked={settings.showSightLines} onChange={(v) => a.setSettings({ showSightLines: v })} />
           <p className="muted small">Vision is simulated on the minimap: walls and vision-blocking utility stop sight. Boxes and height differences don't.</p>

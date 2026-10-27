@@ -151,6 +151,16 @@ export function castVision(occ: Occupancy | null, obstacles: Obstacle[], v: View
   return pts;
 }
 
+/** Where the crosshair lands: the first wall or vision blocker straight along the facing direction. */
+export function castAim(occ: Occupancy | null, obstacles: Obstacle[], v: Viewer, maxDist: number) {
+  const a = (v.facing * Math.PI) / 180;
+  const dx = Math.cos(a);
+  const dy = Math.sin(a);
+  const limit = Math.min(maxDist, obstacleDistance(v.x, v.y, dx, dy, obstacles));
+  const d = marchWalls(occ, v.x, v.y, dx, dy, limit);
+  return { x: v.x + dx * d, y: v.y + dy * d, blocked: d < maxDist - 1e-6 };
+}
+
 export function canSee(occ: Occupancy | null, obstacles: Obstacle[], v: Viewer, tx: number, ty: number, useWalls: boolean) {
   const vx = tx - v.x;
   const vy = ty - v.y;
