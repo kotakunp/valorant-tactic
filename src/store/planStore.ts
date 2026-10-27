@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { BoardEl, PalettePayload, Plan, Side, Step, Team, Tool } from '../types';
 import { uid } from '../lib/ids';
 import { createFromPayload } from '../lib/elements';
+import { onStorageFull, safeJSONStorage } from '../lib/safeStorage';
 
 export type Rotation = 0 | 90 | 180 | 270;
 
@@ -38,6 +39,8 @@ interface PlanState {
   focusAgentId: string | null;
   settings: Settings;
   library: Plan[];
+  /** Folders the user created; folders in use by plans are listed even when absent here. */
+  folders: string[];
   past: Plan[];
   future: Plan[];
   playback: Playback | null;
@@ -55,6 +58,7 @@ interface PlanState {
   select: (id: string | null) => void;
 
   addElement: (el: BoardEl) => void;
+  addElements: (els: BoardEl[]) => void;
   placePayload: (payload: PalettePayload, pos: { x: number; y: number }) => void;
   updateElement: (id: string, patch: Partial<BoardEl>, coalesceKey?: string) => void;
   removeElement: (id: string) => void;
@@ -78,6 +82,10 @@ interface PlanState {
   loadPlan: (plan: Plan) => void;
   saveToLibrary: () => void;
   deleteFromLibrary: (id: string) => void;
+  updateLibraryPlan: (id: string, patch: Partial<Pick<Plan, 'folder' | 'tags'>>) => void;
+  createFolder: (name: string) => void;
+  renameFolder: (from: string, to: string) => void;
+  deleteFolder: (name: string) => void;
 
   setPlayback: (p: Playback | null) => void;
   showToast: (message: string) => void;
@@ -105,6 +113,11 @@ function upsertLibrary(library: Plan[], plan: Plan) {
 }
 
 const STORAGE_KEY = 'valo-tactic:planner';
+
+/** Folder and tags are library metadata, so undoing a board edit must not roll them back. */
+function keepMeta(target: Plan, current: Plan): Plan {
+  return { ...target, folder: current.folder, tags: current.tags };
+}
 
 let lastCommitKey: string | null = null;
 let lastCommitAt = 0;
@@ -160,6 +173,7 @@ export const usePlan = create<PlanState>()(
           showCrosshair: true,
         },
         library: [],
+        folders: [],
         past: [],
         future: [],
         playback: null,
@@ -177,6 +191,7 @@ export const usePlan = create<PlanState>()(
         select: (selectedId) => set({ selectedId }),
 
         addElement: (el) => mutateElements((els) => [...els, el], undefined, { selectedId: el.id }),
+        addElements: (added) => mutateElements((els) => [...els, ...added], undefined, { selectedId: added[added.length - 1]?.id ?? null }),
         placePayload: (payload, pos) => {
           const el = createFromPayload(payload, pos, get().team);
           if (el) get().addElement(el);
@@ -194,8 +209,8 @@ export const usePlan = create<PlanState>()(
           const src = get().plan.steps[get().stepIndex]?.elements.find((e) => e.id === id);
           if (!src) return;
           const copy: BoardEl =
-            src.kind === 'stroke'
-              ? { ...src, id: uid(), points: src.points.map((p) => p + 20) }
+            'points' in src
+              ? ({ ...src, id: uid(), points: src.points.map((p) => p + 20) } as BoardEl)
               : ({ ...src, id: uid(), x: src.x + 20, y: src.y + 20 } as BoardEl);
           get().addElement(copy);
         },
@@ -247,7 +262,7 @@ export const usePlan = create<PlanState>()(
         undo: () => {
           const { past, plan, future, stepIndex } = get();
           if (!past.length) return;
-          const prev = past[past.length - 1];
+          const prev = keepMeta(past[past.length - 1], plan);
           lastCommitKey = null;
           set({
             plan: prev,
@@ -261,7 +276,7 @@ export const usePlan = create<PlanState>()(
         redo: () => {
           const { past, plan, future, stepIndex } = get();
           if (!future.length) return;
-          const next = future[0];
+          const next = keepMeta(future[0], plan);
           lastCommitKey = null;
           set({
             plan: next,
@@ -286,6 +301,36 @@ export const usePlan = create<PlanState>()(
           // Otherwise the next edit would autosave the deleted strategy straight back in.
           if (plan.id === id) set({ plan: makePlan(plan.mapId), stepIndex: 0, past: [], future: [], selectedId: null });
         },
+        updateLibraryPlan: (id, patch) => {
+          const { plan, library } = get();
+          const target = id === plan.id ? plan : library.find((p) => p.id === id);
+          if (!target) return;
+          const next = { ...target, ...patch, updatedAt: Date.now() };
+          set({
+            library: library.some((p) => p.id === id) ? library.map((p) => (p.id === id ? next : p)) : upsertLibrary(library, next),
+            ...(id === plan.id ? { plan: next } : {}),
+          });
+        },
+        createFolder: (name) => {
+          const n = name.trim();
+          if (n && !get().folders.includes(n)) set({ folders: [...get().folders, n] });
+        },
+        renameFolder: (from, to) => {
+          const n = to.trim();
+          if (!n || n === from) return;
+          const { plan, library, folders } = get();
+          const move = (p: Plan) => (p.folder === from ? { ...p, folder: n, updatedAt: Date.now() } : p);
+          set({
+            folders: [...new Set(folders.map((f) => (f === from ? n : f)))],
+            library: library.map(move),
+            plan: move(plan),
+          });
+        },
+        deleteFolder: (name) => {
+          const { plan, library, folders } = get();
+          const unfile = (p: Plan) => (p.folder === name ? { ...p, folder: undefined, updatedAt: Date.now() } : p);
+          set({ folders: folders.filter((f) => f !== name), library: library.map(unfile), plan: unfile(plan) });
+        },
 
         setPlayback: (playback) => set({ playback }),
         showToast: (message) => set({ toast: { id: Date.now(), message } }),
@@ -294,6 +339,7 @@ export const usePlan = create<PlanState>()(
     {
       name: STORAGE_KEY,
       version: 1,
+      storage: safeJSONStorage(),
       // Shallow merge would drop settings added after a user's state was first saved.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<PlanState>;
@@ -304,6 +350,7 @@ export const usePlan = create<PlanState>()(
         stepIndex: s.stepIndex,
         settings: s.settings,
         library: s.library,
+        folders: s.folders,
         team: s.team,
         color: s.color,
         strokeWidth: s.strokeWidth,
@@ -322,10 +369,17 @@ if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key !== STORAGE_KEY || !e.newValue) return;
     let incoming: Plan[] | undefined;
+    let incomingFolders: string[] | undefined;
     try {
-      incoming = JSON.parse(e.newValue)?.state?.library;
+      const state = JSON.parse(e.newValue)?.state;
+      incoming = state?.library;
+      incomingFolders = state?.folders;
     } catch {
       return;
+    }
+    if (Array.isArray(incomingFolders)) {
+      const { folders } = usePlan.getState();
+      if (incomingFolders.join('|') !== folders.join('|')) usePlan.setState({ folders: incomingFolders });
     }
     if (!Array.isArray(incoming)) return;
     const { plan, library } = usePlan.getState();
@@ -335,6 +389,8 @@ if (typeof window !== 'undefined') {
     if (librarySignature(merged) !== librarySignature(library)) usePlan.setState({ library: merged });
   });
 }
+
+onStorageFull((message) => usePlan.getState().showToast(message));
 
 export function useCurrentStep() {
   return usePlan((s) => s.plan.steps[s.stepIndex] ?? s.plan.steps[0]);

@@ -22,8 +22,11 @@ export const SHORTCUTS = {
   pen: { label: 'Freehand draw', keys: ['P'] },
   line: { label: 'Straight line', keys: ['L'] },
   area: { label: 'Area circle', keys: ['O'] },
+  rect: { label: 'Rectangle zone', keys: ['B'] },
+  polygon: { label: 'Polygon zone', keys: ['G'] },
   text: { label: 'Text', keys: ['T'] },
   eraser: { label: 'Eraser', keys: ['E'] },
+  image: { label: 'Add image (or paste one)', keys: ['I', 'Mod+V'] },
   arrow: { label: 'Toggle arrow head', keys: ['A'] },
   dashed: { label: 'Toggle dashed lines', keys: ['D'] },
   color: { label: 'Next / previous color', keys: ['C', 'Shift+C'] },
@@ -52,6 +55,7 @@ export const SHORTCUTS = {
   zoomOut: { label: 'Zoom out', keys: ['-'] },
   maps: { label: 'Change map', keys: ['M'] },
   library: { label: 'Library', keys: ['Mod+O'] },
+  lineups: { label: 'Lineups', keys: ['U'] },
   newPlan: { label: 'New strategy', keys: ['Mod+Alt+N'] },
   save: { label: 'Saved automatically', keys: ['Mod+S'] },
   share: { label: 'Copy share link', keys: ['Mod+Shift+S'] },
@@ -62,12 +66,12 @@ export const SHORTCUTS = {
 export type ShortcutId = keyof typeof SHORTCUTS;
 
 export const SHORTCUT_GROUPS: { title: string; ids: ShortcutId[] }[] = [
-  { title: 'Tools', ids: ['select', 'pan', 'pen', 'line', 'area', 'text', 'eraser'] },
+  { title: 'Tools', ids: ['select', 'pan', 'pen', 'line', 'area', 'rect', 'polygon', 'text', 'eraser', 'image'] },
   { title: 'Drawing', ids: ['arrow', 'dashed', 'color', 'width', 'team'] },
   { title: 'Editing', ids: ['undo', 'redo', 'duplicate', 'delete', 'deselect', 'turnLeft', 'turnRight'] },
   { title: 'Steps', ids: ['prevStep', 'nextStep', 'newStep', 'blankStep', 'play'] },
   { title: 'View', ids: ['rotateCw', 'rotateCcw', 'rot0', 'rot90', 'rot180', 'rot270', 'fit', 'zoomIn', 'zoomOut'] },
-  { title: 'Strategy', ids: ['maps', 'library', 'newPlan', 'save', 'share', 'exportPng', 'help'] },
+  { title: 'Strategy', ids: ['maps', 'library', 'lineups', 'newPlan', 'save', 'share', 'exportPng', 'help'] },
 ];
 
 type Side = 'top' | 'bottom' | 'left' | 'right';

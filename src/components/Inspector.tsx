@@ -2,7 +2,7 @@ import { Copy, Trash2 } from 'lucide-react';
 import { usePlan, useCurrentStep } from '../store/planStore';
 import { useGameData } from '../store/gameData';
 import { DRAW_COLORS, TEAM_COLORS } from '../lib/colors';
-import { SLOT_KEYS } from '../lib/abilityPresets';
+import { DEFAULT_CONE_ANGLE, DEFAULT_RECT_WIDTH, SHAPE_LABELS, SLOT_KEYS } from '../lib/abilityPresets';
 import { OBJECTS } from '../lib/objects';
 import type { AgentEl, BoardEl, OverlayShape, Team } from '../types';
 import { DEFAULT_FOV, DEFAULT_VISION_RANGE, normalizeAngle } from '../lib/elements';
@@ -154,10 +154,10 @@ function Selection({ el }: { el: BoardEl }) {
           <TeamPicker team={el.team} onChange={(team) => update({ team })} />
           <div className="field">
             <span className="field-label">Range overlay</span>
-            <div className="segmented full small">
-              {(['none', 'circle', 'wall'] as OverlayShape[]).map((shape) => (
+            <div className="segmented full small shape-grid">
+              {(Object.keys(SHAPE_LABELS) as OverlayShape[]).map((shape) => (
                 <button key={shape} className={el.shape === shape ? 'on' : ''} onClick={() => update({ shape })}>
-                  {shape === 'none' ? 'Icon only' : shape === 'circle' ? 'Radius' : 'Wall'}
+                  {SHAPE_LABELS[shape]}
                 </button>
               ))}
             </div>
@@ -168,14 +168,30 @@ function Selection({ el }: { el: BoardEl }) {
                 <span className="field-label">
                   {el.shape === 'circle' ? 'Radius' : 'Length'} <b>{el.size.toFixed(1)} m</b>
                 </span>
-                <input type="range" min={0.5} max={60} step={0.1} value={el.size} onChange={(e) => update({ size: Number(e.target.value) }, `size-${el.id}`)} />
+                <input type="range" min={0.5} max={el.shape === 'line' ? 200 : 80} step={0.1} value={el.size} onChange={(e) => update({ size: Number(e.target.value) }, `size-${el.id}`)} />
               </label>
-              {el.shape === 'wall' && (
+              {el.shape === 'rect' && (
                 <label className="field">
                   <span className="field-label">
-                    Rotation <b>{Math.round(el.rotation)}°</b>
+                    Width <b>{(el.width ?? DEFAULT_RECT_WIDTH).toFixed(1)} m</b>
                   </span>
-                  <input type="range" min={-180} max={180} step={1} value={el.rotation} onChange={(e) => update({ rotation: Number(e.target.value) }, `rot-${el.id}`)} />
+                  <input type="range" min={0.5} max={40} step={0.1} value={el.width ?? DEFAULT_RECT_WIDTH} onChange={(e) => update({ width: Number(e.target.value) }, `width-${el.id}`)} />
+                </label>
+              )}
+              {el.shape === 'cone' && (
+                <label className="field">
+                  <span className="field-label">
+                    Spread <b>{el.angle ?? DEFAULT_CONE_ANGLE}°</b>
+                  </span>
+                  <input type="range" min={10} max={360} step={1} value={el.angle ?? DEFAULT_CONE_ANGLE} onChange={(e) => update({ angle: Number(e.target.value) }, `angle-${el.id}`)} />
+                </label>
+              )}
+              {el.shape !== 'circle' && (
+                <label className="field">
+                  <span className="field-label">
+                    {el.shape === 'wall' ? 'Rotation' : 'Direction'} <b>{Math.round(normalizeAngle(el.rotation))}°</b>
+                  </span>
+                  <input type="range" min={-180} max={180} step={1} value={normalizeAngle(el.rotation)} onChange={(e) => update({ rotation: Number(e.target.value) }, `rot-${el.id}`)} />
                 </label>
               )}
               <Toggle label="Blocks vision" checked={!!el.blocksVision} onChange={(blocksVision) => update({ blocksVision })} />
@@ -235,6 +251,46 @@ function Selection({ el }: { el: BoardEl }) {
             </span>
             <input type="range" min={5} max={300} step={1} value={el.radius} onChange={(e) => update({ radius: Number(e.target.value) }, `r-${el.id}`)} />
           </label>
+        </>
+      );
+      break;
+    case 'rect':
+      title = 'Rectangle';
+      subtitle = 'Zone';
+      body = (
+        <>
+          <ColorPicker value={el.color} onChange={(color) => update({ color })} />
+          <p className="muted small">Drag the corner handles on the map to resize.</p>
+        </>
+      );
+      break;
+    case 'polygon':
+      title = 'Polygon';
+      subtitle = `Zone · ${el.points.length / 2} corners`;
+      body = <ColorPicker value={el.color} onChange={(color) => update({ color })} />;
+      break;
+    case 'image':
+      title = 'Image';
+      subtitle = 'Picture';
+      body = (
+        <>
+          <label className="field">
+            <span className="field-label">
+              Size <b>{Math.round(Math.max(el.width, el.height))}</b>
+            </span>
+            <input
+              type="range"
+              min={40}
+              max={900}
+              step={1}
+              value={Math.max(el.width, el.height)}
+              onChange={(e) => {
+                const k = Number(e.target.value) / Math.max(el.width, el.height);
+                update({ width: el.width * k, height: el.height * k }, `img-${el.id}`);
+              }}
+            />
+          </label>
+          <p className="muted small">Drag the corners on the map to resize. Paste an image (Ctrl/⌘+V) to add another.</p>
         </>
       );
       break;

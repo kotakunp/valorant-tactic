@@ -1,4 +1,5 @@
-import { CheckCircle2, ChevronDown, Download, FolderOpen, FilePlus2, Keyboard, PanelLeft, PanelRight, Redo2, Share2, Undo2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Crosshair, Download, FolderOpen, FilePlus2, Keyboard, PanelLeft, PanelRight, Redo2, Share2, Undo2 } from 'lucide-react';
+import { useLineups } from '../store/lineupStore';
 import { usePlan } from '../store/planStore';
 import { useGameData } from '../store/gameData';
 import { tip, tipFor } from '../lib/shortcuts';
@@ -16,6 +17,7 @@ export default function TopBar({ onOpenMaps, onOpenLibrary, onOpenHelp, onToggle
   const canUndo = usePlan((s) => s.past.length > 0);
   const canRedo = usePlan((s) => s.future.length > 0);
   const map = useGameData((s) => s.mapsById[plan.mapId]);
+  const lineupsOpen = useLineups((s) => s.open);
   const a = usePlan.getState();
 
   return (
@@ -83,6 +85,14 @@ export default function TopBar({ onOpenMaps, onOpenLibrary, onOpenHelp, onToggle
         </button>
         <button className="btn ghost" onClick={onOpenLibrary} {...tipFor('library', 'bottom', 'Library: all your strategies')}>
           <FolderOpen size={16} /> Library
+        </button>
+        <button
+          className={`btn ghost ${lineupsOpen ? 'on' : ''}`}
+          aria-pressed={lineupsOpen}
+          onClick={() => useLineups.getState().setOpen(!lineupsOpen)}
+          {...tipFor('lineups', 'bottom', 'Lineups for this map')}
+        >
+          <Crosshair size={16} /> Lineups
         </button>
         <button className="btn ghost" onClick={exportPng} {...tipFor('exportPng', 'bottom', 'Export current step as PNG')}>
           <Download size={16} /> PNG

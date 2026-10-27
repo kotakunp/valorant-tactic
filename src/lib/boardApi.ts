@@ -6,6 +6,8 @@ export const boardApi = {
   background: null as Konva.Rect | null,
   fit: () => {},
   zoom: (_factor: number) => {},
+  /** Board coordinates at the middle of the visible canvas. */
+  viewCenter: (): { x: number; y: number } => ({ x: 500, y: 500 }),
 };
 
 export function exportBoardPng(filename: string) {

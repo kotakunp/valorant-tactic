@@ -1,12 +1,13 @@
-import { Arrow, Circle, Group, Image as KImage, Line, Rect, RegularPolygon, Text } from 'react-konva';
+import { Arrow, Circle, Group, Image as KImage, Line, Rect, RegularPolygon, Text, Wedge } from 'react-konva';
 import type Konva from 'konva';
 import { useCanvasImage } from '../../lib/canvasImage';
-import type { AbilityEl, AgentEl, AreaEl, BoardEl, ObjectEl, StrokeEl, TextEl } from '../../types';
+import type { AbilityEl, AgentEl, AreaEl, BoardEl, ImageEl, ObjectEl, PolygonEl, RectEl, StrokeEl, TextEl } from '../../types';
 import type { ApiMap } from '../../api/valorant';
 import { useGameData } from '../../store/gameData';
 import { TEAM_COLORS, withAlpha } from '../../lib/colors';
 import { boardToMeters, metersToBoard } from '../../lib/geo';
 import { OBJECT_ICON } from '../../lib/objects';
+import { DEFAULT_CONE_ANGLE, DEFAULT_RECT_WIDTH } from '../../lib/abilityPresets';
 
 export interface NodeProps<T extends BoardEl> {
   el: T;
@@ -199,6 +200,50 @@ export function AbilityNode({ el, rot, scale, selected, interactive, opacity, ma
           listening={false}
         />
       )}
+      {showOverlay && el.shape === 'cone' && (
+        <Wedge
+          radius={len}
+          angle={el.angle ?? DEFAULT_CONE_ANGLE}
+          rotation={el.rotation - (el.angle ?? DEFAULT_CONE_ANGLE) / 2}
+          fill={withAlpha(color, 0.2)}
+          stroke={withAlpha(color, 0.9)}
+          strokeWidth={1.5}
+          dash={[6, 4]}
+          listening={false}
+        />
+      )}
+      {showOverlay && el.shape === 'rect' && (() => {
+        const w = metersToBoard(map, el.width ?? DEFAULT_RECT_WIDTH);
+        return (
+          <Rect
+            width={len}
+            height={w}
+            offsetY={w / 2}
+            rotation={el.rotation}
+            fill={withAlpha(color, el.blocksVision ? 0.3 : 0.2)}
+            stroke={withAlpha(color, 0.9)}
+            strokeWidth={1.5}
+            dash={el.blocksVision ? undefined : [6, 4]}
+            listening={false}
+          />
+        );
+      })()}
+      {showOverlay && el.shape === 'line' && (
+        <>
+          <Line
+            points={[0, 0, Math.cos(rad) * len, Math.sin(rad) * len]}
+            stroke={color}
+            strokeWidth={el.blocksVision ? thickness : 2}
+            opacity={el.blocksVision ? 0.6 : 1}
+            lineCap="round"
+            shadowColor="#000"
+            shadowBlur={3}
+            shadowOpacity={0.7}
+            listening={false}
+          />
+          <Circle x={Math.cos(rad) * len} y={Math.sin(rad) * len} radius={3} fill={color} stroke="#0f1923" strokeWidth={1} listening={false} />
+        </>
+      )}
       <Group rotation={-rot}>
         <Rect
           x={-half}
@@ -341,6 +386,74 @@ export function AreaNode({ el, selected, interactive, opacity, onChange }: NodeP
   );
 }
 
+export function RectNode({ el, selected, interactive, opacity, onChange }: NodeProps<RectEl>) {
+  return (
+    <Rect
+      id={el.id}
+      name="element"
+      x={el.x}
+      y={el.y}
+      width={el.width}
+      height={el.height}
+      fill={withAlpha(el.color, 0.22)}
+      stroke={selected ? '#ece8e1' : el.color}
+      strokeWidth={2}
+      strokeScaleEnabled={false}
+      dash={selected ? [6, 4] : undefined}
+      opacity={opacity}
+      draggable={interactive}
+      onDragEnd={moveOnDragEnd(onChange)}
+    />
+  );
+}
+
+export function PolygonNode({ el, selected, interactive, opacity, onChange }: NodeProps<PolygonEl>) {
+  return (
+    <Line
+      id={el.id}
+      name="element"
+      points={el.points}
+      closed
+      fill={withAlpha(el.color, 0.22)}
+      stroke={selected ? '#ece8e1' : el.color}
+      strokeWidth={2}
+      lineJoin="round"
+      dash={selected ? [6, 4] : undefined}
+      opacity={opacity}
+      draggable={interactive}
+      onDragEnd={(e: DragEvt) => {
+        const node = e.target;
+        const dx = node.x();
+        const dy = node.y();
+        node.position({ x: 0, y: 0 });
+        onChange({ points: el.points.map((p, i) => p + (i % 2 === 0 ? dx : dy)) });
+      }}
+    />
+  );
+}
+
+export function ImageNode({ el, rot, selected, interactive, opacity, onChange }: NodeProps<ImageEl>) {
+  const img = useCanvasImage(el.src);
+  return (
+    <Group id={el.id} name="element" x={el.x} y={el.y} rotation={-rot} opacity={opacity} draggable={interactive} onDragEnd={moveOnDragEnd(onChange)}>
+      <Rect
+        x={-el.width / 2}
+        y={-el.height / 2}
+        width={el.width}
+        height={el.height}
+        fill="#0b131b"
+        stroke={selected ? '#ece8e1' : 'rgba(236,232,225,0.35)'}
+        strokeWidth={1.5}
+        strokeScaleEnabled={false}
+        shadowColor="#000"
+        shadowBlur={10}
+        shadowOpacity={0.55}
+      />
+      {img && <KImage image={img} x={-el.width / 2} y={-el.height / 2} width={el.width} height={el.height} />}
+    </Group>
+  );
+}
+
 export function ElementNode(props: NodeProps<BoardEl>) {
   const { el } = props;
   switch (el.kind) {
@@ -356,5 +469,11 @@ export function ElementNode(props: NodeProps<BoardEl>) {
       return <TextNode {...props} el={el} />;
     case 'area':
       return <AreaNode {...props} el={el} />;
+    case 'rect':
+      return <RectNode {...props} el={el} />;
+    case 'polygon':
+      return <PolygonNode {...props} el={el} />;
+    case 'image':
+      return <ImageNode {...props} el={el} />;
   }
 }

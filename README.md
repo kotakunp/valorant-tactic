@@ -5,8 +5,9 @@ A Valorant strategy planner in the spirit of valoplant.gg. You plan on the real 
 ## Features
 
 - **Real game data:** all competitive maps (minimaps, splash art, callouts placed with the API's world-to-minimap transform), every playable agent, and each agent's abilities with official icons and descriptions.
-- **Board:** drag or click to place agents, abilities and markers (spike, danger, watch, kill). Draw freehand or straight lines (arrows/dashed), area circles and text. Erase, zoom (scroll), pan (Space/H), rotate the map (R).
-- **Ability ranges at map scale:** smokes, walls and similar abilities render a radius or wall in meters, converted per map. Drag the handle to resize or aim. Defaults for common utility are approximate and editable.
+- **Board:** drag or click to place agents, abilities and markers (spike, danger, watch, kill). Draw freehand or straight lines (arrows/dashed), area circles, rectangles (B), polygon zones (G) and text. Add images with the toolbar button (I) or by pasting a screenshot; drag the corners to resize. Erase, zoom (scroll), pan (Space/H), rotate the map (R).
+- **Ability shapes at map scale:** each ability can show a radius (smokes, mollies), a wall (Viper, Harbor, Sage), a cone (Spycam, turret, Rolling Thunder), an area strip (Fault Line, Fast Lane) or a line (Trapwire, Cosmic Divide), measured in meters and converted per map. Drag the handle to resize or aim. Defaults for common utility are approximate and editable.
+- **Lineups** (U): save where to stand and where utility lands for each agent and map, with up to three screenshots, a video link and notes. Filter by agent and side, see them as markers on the map, and place one on the current step as an agent aimed at an ability. Export and import lineups as `.json` files.
 - **Orientation & vision:** every agent has a facing direction (drag the aim handle or press `[` / `]`) and a vision cone (103° FOV, adjustable range). Cones are ray-cast against the minimap, so walls cut them off, and vision-blocking utility (smokes, walls) does too. A crosshair line runs through the middle of each cone to the first wall or smoke it hits. Agents seen by an opponent get a SPOTTED badge with sight lines; two or more viewers shows CROSSFIRE ×N. Height differences and boxes aren't modeled.
 - **Steps:** build a strategy in steps. "Next step" copies the current one so you can move pieces. Play animates every piece from step to step, and the previous step shows as a ghost with movement arrows.
 - **Save & share:** see below. Also exports the current step as PNG.
@@ -14,9 +15,11 @@ A Valorant strategy planner in the spirit of valoplant.gg. You plan on the real 
 
 ## Saving and sharing
 
-- **Autosave:** every change is written to this browser's localStorage immediately. Closing the tab, reloading or restarting the browser keeps your work. Every strategy you've touched is listed in the **Library** (`Ctrl/⌘+O`). Open tabs keep their libraries in sync.
-- **Share link** (`Ctrl/⌘+Shift+S`): copies a URL with the whole strategy compressed into it. Whoever opens it gets their own copy in their Library. Nothing is uploaded; the link is the data.
+- **Autosave:** every change is written to this browser's localStorage immediately. Closing the tab, reloading or restarting the browser keeps your work. Every strategy you've touched is listed in the **Library** (`Ctrl/⌘+O`), where you can sort them into folders, tag them, and search or filter by map, side and tag. Open tabs keep their libraries in sync.
+- **Share link** (`Ctrl/⌘+Shift+S`): copies a URL with the whole strategy compressed into it. Whoever opens it gets their own copy in their Library. Nothing is uploaded; the link is the data. Images are left out to keep links short, so use a file export to share a strategy with images.
 - **File export/import:** in the Library, export any strategy as a `.json` file and import it on another device or browser. Use this as a backup.
+
+Images are downscaled before they're stored, but localStorage is limited to a few megabytes per site. If it fills up you get a warning; delete old strategies, lineups or images to make room.
 
 Saved data lives only in the browser profile that created it. Clearing site data, or using a private window, removes it. Use a share link or file to move strategies between devices.
 

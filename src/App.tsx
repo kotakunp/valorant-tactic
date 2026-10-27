@@ -11,7 +11,10 @@ import Library from './components/Library';
 import Toast from './components/Toast';
 import TooltipLayer from './components/TooltipLayer';
 import ShortcutsModal from './components/ShortcutsModal';
-import { copyShareLink, exportPng, startNewPlan } from './lib/actions';
+import LineupsPanel from './components/LineupsPanel';
+import { addImageFiles, copyShareLink, exportPng, startNewPlan } from './lib/actions';
+import { pickImageFiles } from './lib/images';
+import { useLineups } from './store/lineupStore';
 import { togglePlayback } from './lib/playback';
 import { DRAW_COLORS, STROKE_WIDTHS } from './lib/colors';
 import { useGameData } from './store/gameData';
@@ -21,7 +24,7 @@ import { boardApi } from './lib/boardApi';
 import { normalizeAngle } from './lib/elements';
 import type { Tool } from './types';
 
-const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', p: 'pen', l: 'line', o: 'area', t: 'text', e: 'eraser' };
+const TOOL_KEYS: Record<string, Tool> = { v: 'select', h: 'pan', p: 'pen', l: 'line', o: 'area', b: 'rect', g: 'polygon', t: 'text', e: 'eraser' };
 const ROTATION_KEYS: Record<string, Rotation> = { '1': 0, '2': 90, '3': 180, '4': 270 };
 
 function isTyping(target: EventTarget | null) {
@@ -95,12 +98,15 @@ export default function App() {
       }
       if (e.altKey) return;
       if (e.key === 'Escape') {
+        const lu = useLineups.getState();
+        if (lu.picking) return lu.setPicking(null);
         s.setArmed(null);
         s.select(null);
         return;
       }
       if (e.key === '?') return run(() => setModal('help'));
       if (key === 'k') return run(togglePlayback);
+      if (key === 'u' && !e.shiftKey) return run(() => useLineups.getState().setOpen(!useLineups.getState().open));
       if (s.playback) return;
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && s.selectedId) run(() => s.removeElement(s.selectedId!));
@@ -129,6 +135,7 @@ export default function App() {
       else if (e.key === '=' || e.key === '+') boardApi.zoom(1.25);
       else if (e.key === '-' || e.key === '_') boardApi.zoom(1 / 1.25);
       else if (key === 'm') setModal('maps');
+      else if (key === 'i') run(() => pickImageFiles(true).then(addImageFiles));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -177,6 +184,7 @@ export default function App() {
       <main className="main">
         <Board />
         <Toolbar />
+        <LineupsPanel />
       </main>
       <Timeline />
       <Inspector onOpenHelp={() => setModal('help')} />

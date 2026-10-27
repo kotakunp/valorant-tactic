@@ -1,9 +1,13 @@
 export type Team = 'ally' | 'enemy';
 export type Side = 'attack' | 'defense';
 export type AbilitySlot = 'Grenade' | 'Ability1' | 'Ability2' | 'Ultimate';
-export type OverlayShape = 'none' | 'circle' | 'wall';
+/**
+ * circle: radius around the drop point. wall: thick bar centred on it.
+ * cone / rect / line: start at the drop point and extend along `rotation`.
+ */
+export type OverlayShape = 'none' | 'circle' | 'wall' | 'cone' | 'rect' | 'line';
 export type ObjectKind = 'spike' | 'danger' | 'vision' | 'death';
-export type Tool = 'select' | 'pan' | 'pen' | 'line' | 'area' | 'text' | 'eraser';
+export type Tool = 'select' | 'pan' | 'pen' | 'line' | 'area' | 'rect' | 'polygon' | 'text' | 'eraser';
 
 export interface AgentEl {
   id: string;
@@ -32,8 +36,12 @@ export interface AbilityEl {
   /** Degrees, in board space. Used by wall overlays. */
   rotation: number;
   shape: OverlayShape;
-  /** Meters. Radius for circles, full length for walls. */
+  /** Meters. Radius for circles; length for walls, cones, rects and lines. */
   size: number;
+  /** Meters, rect shapes only. */
+  width?: number;
+  /** Degrees, cone shapes only. */
+  angle?: number;
   /** Smokes and walls that stop line of sight. */
   blocksVision?: boolean;
 }
@@ -76,7 +84,37 @@ export interface AreaEl {
   color: string;
 }
 
-export type BoardEl = AgentEl | AbilityEl | ObjectEl | StrokeEl | TextEl | AreaEl;
+export interface RectEl {
+  id: string;
+  kind: 'rect';
+  /** Top-left corner. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+}
+
+export interface PolygonEl {
+  id: string;
+  kind: 'polygon';
+  points: number[];
+  color: string;
+}
+
+export interface ImageEl {
+  id: string;
+  kind: 'image';
+  /** Centre; images stay upright when the map rotates. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Downscaled data URL, so plans stay self-contained. */
+  src: string;
+}
+
+export type BoardEl = AgentEl | AbilityEl | ObjectEl | StrokeEl | TextEl | AreaEl | RectEl | PolygonEl | ImageEl;
 
 export interface Step {
   id: string;
@@ -91,6 +129,32 @@ export interface Plan {
   mapId: string;
   side: Side;
   steps: Step[];
+  updatedAt: number;
+  /** Library folder name; missing means unfiled. */
+  folder?: string;
+  tags?: string[];
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Lineup {
+  id: string;
+  mapId: string;
+  agentId: string;
+  slot: AbilitySlot;
+  side: Side | 'both';
+  title: string;
+  notes: string;
+  /** Board coordinates, same frame as plan elements. */
+  stand: Point;
+  land: Point;
+  /** Downscaled data URLs: where to stand, where to aim, the result. */
+  images: string[];
+  videoUrl?: string;
+  createdAt: number;
   updatedAt: number;
 }
 

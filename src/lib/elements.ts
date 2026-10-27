@@ -1,6 +1,6 @@
 import type { BoardEl, PalettePayload, Team } from '../types';
 import { useGameData } from '../store/gameData';
-import { rangePreset } from './abilityPresets';
+import { DEFAULT_CONE_ANGLE, DEFAULT_RECT_WIDTH, rangePreset } from './abilityPresets';
 import { uid } from './ids';
 import { BOARD } from './geo';
 
@@ -39,6 +39,8 @@ export function createFromPayload(payload: PalettePayload, pos: { x: number; y: 
         rotation: 0,
         shape: preset.shape,
         size: preset.size,
+        width: preset.width ?? DEFAULT_RECT_WIDTH,
+        angle: preset.angle ?? DEFAULT_CONE_ANGLE,
         blocksVision: preset.blocksVision ?? false,
       };
     }
@@ -70,7 +72,7 @@ export function interpolateSteps(from: BoardEl[], to: BoardEl[], rawT: number): 
   const staying: Frame[] = to.map((el) => {
     const prev = fromById.get(el.id);
     if (!prev) return { el, opacity: t };
-    if (prev.kind !== el.kind || el.kind === 'stroke' || prev.kind === 'stroke') return { el, opacity: 1 };
+    if (prev.kind !== el.kind || !('x' in el) || !('x' in prev)) return { el, opacity: 1 };
     const moved = { ...el, x: lerp(prev.x, el.x, t), y: lerp(prev.y, el.y, t) } as BoardEl;
     if (moved.kind === 'agent' && prev.kind === 'agent' && prev.facing !== undefined && moved.facing !== undefined) {
       moved.facing = lerpAngle(prev.facing, moved.facing, t);

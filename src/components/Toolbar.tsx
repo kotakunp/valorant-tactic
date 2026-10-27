@@ -1,5 +1,7 @@
-import { Circle, Eraser, Hand, MousePointer2, MoveUpRight, Pencil, Spline, Type } from 'lucide-react';
+import { Circle, Eraser, Hand, ImagePlus, MousePointer2, MoveUpRight, Pencil, Pentagon, Spline, Square, Type } from 'lucide-react';
 import { usePlan } from '../store/planStore';
+import { addImageFiles } from '../lib/actions';
+import { pickImageFiles } from '../lib/images';
 import { DRAW_COLORS, STROKE_WIDTHS } from '../lib/colors';
 import { SHORTCUTS, tip, tipFor, type ShortcutId } from '../lib/shortcuts';
 import type { Tool } from '../types';
@@ -10,6 +12,8 @@ const TOOLS: { tool: Tool; Icon: typeof Pencil }[] = [
   { tool: 'pen', Icon: Pencil },
   { tool: 'line', Icon: MoveUpRight },
   { tool: 'area', Icon: Circle },
+  { tool: 'rect', Icon: Square },
+  { tool: 'polygon', Icon: Pentagon },
   { tool: 'text', Icon: Type },
   { tool: 'eraser', Icon: Eraser },
 ];
@@ -29,6 +33,9 @@ export default function Toolbar() {
           <Icon size={18} />
         </button>
       ))}
+      <button className="tool" onClick={() => pickImageFiles(true).then(addImageFiles)} {...tipFor('image', 'right')}>
+        <ImagePlus size={18} />
+      </button>
       <div className="toolbar-sep" />
       {DRAW_COLORS.map((c) => (
         <button

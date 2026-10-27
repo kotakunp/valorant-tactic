@@ -190,15 +190,29 @@ export function toViewer(el: AgentEl, map: ApiMap | undefined): Viewer | null {
 export function collectObstacles(elements: BoardEl[], map: ApiMap | undefined): Obstacle[] {
   const out: Obstacle[] = [];
   for (const el of elements) {
-    if (el.kind !== 'ability' || !el.blocksVision || el.shape === 'none') continue;
+    if (el.kind !== 'ability' || !el.blocksVision || el.shape === 'none' || el.shape === 'cone') continue;
     const len = metersToBoard(map, el.size);
     if (el.shape === 'circle') {
       out.push({ type: 'circle', x: el.x, y: el.y, r: len });
-    } else {
-      const a = (el.rotation * Math.PI) / 180;
-      const hx = (Math.cos(a) * len) / 2;
-      const hy = (Math.sin(a) * len) / 2;
+      continue;
+    }
+    const a = (el.rotation * Math.PI) / 180;
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    if (el.shape === 'wall') {
+      const hx = (ux * len) / 2;
+      const hy = (uy * len) / 2;
       out.push({ type: 'segment', x1: el.x - hx, y1: el.y - hy, x2: el.x + hx, y2: el.y + hy });
+    } else if (el.shape === 'line') {
+      out.push({ type: 'segment', x1: el.x, y1: el.y, x2: el.x + ux * len, y2: el.y + uy * len });
+    } else {
+      // Only the long sides block, so a lane like Neon's can still be looked down.
+      const hw = metersToBoard(map, el.width ?? 6) / 2;
+      for (const side of [-1, 1]) {
+        const ox = -uy * hw * side;
+        const oy = ux * hw * side;
+        out.push({ type: 'segment', x1: el.x + ox, y1: el.y + oy, x2: el.x + ox + ux * len, y2: el.y + oy + uy * len });
+      }
     }
   }
   return out;

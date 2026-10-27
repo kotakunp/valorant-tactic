@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Arrow, Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import { Arrow, Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import { useCanvasImage } from '../../lib/canvasImage';
 import { Maximize, Minus, Plus, RotateCcw, RotateCw } from 'lucide-react';
@@ -14,11 +14,21 @@ import { uid } from '../../lib/ids';
 import type { AgentEl, BoardEl, PalettePayload } from '../../types';
 import { ElementNode, AGENT_RADIUS } from './nodes';
 import { castAim, castVision, collectObstacles, computeSightings, toViewer, useOccupancy } from '../../lib/vision';
+import { useLineups } from '../../store/lineupStore';
+import { filterLineups } from '../../lib/lineups';
+import { addImageFiles, addLineupImages } from '../../lib/actions';
+import { imageFromClipboard } from '../../lib/images';
+import { LineupMarker } from './LineupOverlay';
 
 type Draft =
   | { kind: 'pen'; points: number[] }
   | { kind: 'line'; points: number[] }
-  | { kind: 'area'; x: number; y: number; r: number };
+  | { kind: 'area'; x: number; y: number; r: number }
+  | { kind: 'rect'; x0: number; y0: number; x1: number; y1: number }
+  | { kind: 'polygon'; points: number[]; cursor: { x: number; y: number } | null };
+
+/** Board units; clicking this close to the first vertex closes a polygon. */
+const CLOSE_DIST = 10;
 
 interface TextEditState {
   id?: string;
@@ -39,6 +49,15 @@ const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 const ROTATION_SHORTCUTS: ShortcutId[] = ['rot0', 'rot90', 'rot180', 'rot270'];
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 8;
+
+function findLineupId(node: Konva.Node | null, stage: Konva.Stage | null): string | null {
+  let n: Konva.Node | null = node;
+  while (n && n !== stage) {
+    if (n.hasName('lineup')) return (n.getAttr('lineupId') as string) ?? null;
+    n = n.getParent();
+  }
+  return null;
+}
 
 function findElementId(node: Konva.Node | null, stage: Konva.Stage | null): string | null {
   let n: Konva.Node | null = node;
@@ -63,6 +82,7 @@ export default function Board() {
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const [live, setLive] = useState<{ id: string; x: number; y: number } | null>(null);
   const coneCache = useRef(new Map<string, number[]>());
+  const trRef = useRef<Konva.Transformer>(null);
 
   const plan = usePlan((s) => s.plan);
   const stepIndex = usePlan((s) => s.stepIndex);
@@ -77,6 +97,13 @@ export default function Board() {
   const arrow = usePlan((s) => s.arrow);
   const dashed = usePlan((s) => s.dashed);
   const actions = usePlan.getState();
+  const lineupsOpen = useLineups((s) => s.open);
+  const lineups = useLineups((s) => s.lineups);
+  const lineupFilter = useLineups((s) => s.filter);
+  const activeLineupId = useLineups((s) => s.activeId);
+  const lineupDraft = useLineups((s) => s.draft);
+  const picking = useLineups((s) => s.picking);
+  const editingLineupId = lineupDraft?.id;
 
   const map = useGameData((s) => s.mapsById[plan.mapId]);
   const mapImg = useCanvasImage(map?.displayIcon);
@@ -113,7 +140,26 @@ export default function Board() {
     boardApi.background = bgRef.current;
     boardApi.fit = fit;
     boardApi.zoom = (factor) => zoomAt(factor);
+    boardApi.viewCenter = () => {
+      const g = boardRef.current;
+      if (!g || !size.w) return { x: BOARD / 2, y: BOARD / 2 };
+      return g.getAbsoluteTransform().copy().invert().point({ x: size.w / 2, y: size.h / 2 });
+    };
   });
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      const file = imageFromClipboard(e);
+      if (!file) return;
+      e.preventDefault();
+      if (useLineups.getState().draft) addLineupImages([file]);
+      else addImageFiles([file]);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
 
   useEffect(() => {
     // Konva measures text on draw, so redraw once the web font is available.
@@ -145,9 +191,18 @@ export default function Board() {
   const finishDraft = useCallback(() => {
     const d = draftRef.current;
     erasing.current = false;
-    if (!d) return;
+    // Polygons are built click by click and finish on their own.
+    if (!d || d.kind === 'polygon') return;
     setDraftBoth(null);
     const s = usePlan.getState();
+    if (d.kind === 'rect') {
+      const width = Math.abs(d.x1 - d.x0);
+      const height = Math.abs(d.y1 - d.y0);
+      if (width > 4 && height > 4) {
+        s.addElement({ id: uid(), kind: 'rect', x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), width, height, color: s.color });
+      }
+      return;
+    }
     if (d.kind === 'pen' && d.points.length >= 6) {
       s.addElement({ id: uid(), kind: 'stroke', points: d.points, color: s.color, width: s.strokeWidth, arrow: s.arrow, dashed: s.dashed, smooth: true });
     } else if (d.kind === 'line') {
@@ -164,6 +219,41 @@ export default function Board() {
     window.addEventListener('pointerup', finishDraft);
     return () => window.removeEventListener('pointerup', finishDraft);
   }, [finishDraft]);
+
+  const closePolygon = useCallback(() => {
+    const d = draftRef.current;
+    if (d?.kind !== 'polygon') return;
+    setDraftBoth(null);
+    if (d.points.length >= 6) {
+      const s = usePlan.getState();
+      s.addElement({ id: uid(), kind: 'polygon', points: d.points, color: s.color });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tool !== 'polygon' && draftRef.current?.kind === 'polygon') setDraftBoth(null);
+  }, [tool]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const d = draftRef.current;
+      if (d?.kind !== 'polygon') return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        closePolygon();
+      } else if (e.key === 'Escape') {
+        setDraftBoth(null);
+      } else if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const points = d.points.slice(0, -2);
+        setDraftBoth(points.length ? { ...d, points } : null);
+      }
+    };
+    // Capture so Backspace edits the polygon before the app-wide "delete selection" handler sees it.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [closePolygon]);
 
   const openTextEditor = (boardX: number, boardY: number, existing?: { id: string; text: string }) => {
     const pointer = stageRef.current?.getPointerPosition();
@@ -198,6 +288,19 @@ export default function Board() {
     const pos = boardPos();
     if (!pos) return;
     const stage = stageRef.current;
+    if (e.target.getParent()?.hasName('transformer')) return;
+    const lu = useLineups.getState();
+    if (lu.picking) {
+      lu.pickPoint(pos);
+      return;
+    }
+    if (lu.open && !armed) {
+      const lineupId = findLineupId(e.target, stage);
+      if (lineupId) {
+        lu.setActive(lineupId);
+        return;
+      }
+    }
     const targetId = findElementId(e.target, stage);
 
     if (armed) {
@@ -218,6 +321,22 @@ export default function Board() {
       case 'area':
         setDraftBoth({ kind: 'area', x: pos.x, y: pos.y, r: 0 });
         break;
+      case 'rect':
+        setDraftBoth({ kind: 'rect', x0: pos.x, y0: pos.y, x1: pos.x, y1: pos.y });
+        break;
+      case 'polygon': {
+        const d = draftRef.current;
+        if (d?.kind === 'polygon') {
+          if (d.points.length >= 6 && Math.hypot(pos.x - d.points[0], pos.y - d.points[1]) < CLOSE_DIST / Math.max(view.scale, 0.5)) {
+            closePolygon();
+          } else {
+            setDraftBoth({ ...d, points: [...d.points, pos.x, pos.y] });
+          }
+        } else {
+          setDraftBoth({ kind: 'polygon', points: [pos.x, pos.y], cursor: pos });
+        }
+        break;
+      }
       case 'text':
         // Opened on click instead: the browser's mousedown default would steal focus from the new input.
         break;
@@ -245,6 +364,10 @@ export default function Board() {
       setDraftBoth({ ...d, points: [...d.points, pos.x, pos.y] });
     } else if (d.kind === 'line') {
       setDraftBoth({ ...d, points: [d.points[0], d.points[1], pos.x, pos.y] });
+    } else if (d.kind === 'rect') {
+      setDraftBoth({ ...d, x1: pos.x, y1: pos.y });
+    } else if (d.kind === 'polygon') {
+      setDraftBoth({ ...d, cursor: pos });
     } else {
       setDraftBoth({ ...d, r: Math.hypot(pos.x - d.x, pos.y - d.y) });
     }
@@ -261,6 +384,17 @@ export default function Board() {
   };
 
   const onDblClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (tool === 'polygon') {
+      // Konva reports two quick clicks anywhere as a double-click, so only finish when both landed on the same spot.
+      // That second click also added a duplicate corner, which gets dropped.
+      const d = draftRef.current;
+      if (d?.kind !== 'polygon' || d.points.length < 4) return;
+      const n = d.points.length;
+      if (Math.hypot(d.points[n - 2] - d.points[n - 4], d.points[n - 1] - d.points[n - 3]) > CLOSE_DIST / Math.max(view.scale, 0.5)) return;
+      setDraftBoth({ ...d, points: d.points.slice(0, -2) });
+      closePolygon();
+      return;
+    }
     if (tool !== 'select' || playback) return;
     const id = findElementId(e.target, stageRef.current);
     const el = step.elements.find((x) => x.id === id);
@@ -382,7 +516,47 @@ export default function Board() {
   const onLiveFor = (id: string) => (pos: { x: number; y: number } | null) => setLive(pos ? { id, ...pos } : null);
   const agentR = AGENT_RADIUS * settings.iconScale;
 
-  const cursor = spaceDown || tool === 'pan' ? 'grab' : armed ? 'copy' : tool === 'text' ? 'text' : tool === 'select' ? 'default' : 'crosshair';
+  const selectedEl = selectedId ? step.elements.find((el) => el.id === selectedId) : undefined;
+  const resizable = interactive && !lineupsOpen && (selectedEl?.kind === 'rect' || selectedEl?.kind === 'image') ? selectedEl : null;
+
+  useEffect(() => {
+    const tr = trRef.current;
+    if (!tr) return;
+    const node = resizable ? stageRef.current?.findOne('#' + resizable.id) : null;
+    tr.nodes(node ? [node] : []);
+    tr.getLayer()?.batchDraw();
+  }, [resizable]);
+
+  const onTransformEnd = () => {
+    const tr = trRef.current;
+    const node = tr?.nodes()[0];
+    if (!node || !resizable) return;
+    const sx = Math.abs(node.scaleX());
+    const sy = Math.abs(node.scaleY());
+    node.scale({ x: 1, y: 1 });
+    if (resizable.kind === 'rect') {
+      actions.updateElement(resizable.id, { x: node.x(), y: node.y(), width: Math.max(5, resizable.width * sx), height: Math.max(5, resizable.height * sy) });
+    } else {
+      actions.updateElement(resizable.id, { x: node.x(), y: node.y(), width: Math.max(10, resizable.width * sx), height: Math.max(10, resizable.height * sy) });
+    }
+  };
+
+  const lineupMarkers = useMemo(() => {
+    if (!lineupsOpen) return [];
+    return filterLineups(lineups, plan.mapId, lineupFilter).filter((l) => l.id !== editingLineupId);
+  }, [lineupsOpen, lineups, plan.mapId, lineupFilter, editingLineupId]);
+
+  const cursor = picking
+    ? 'crosshair'
+    : spaceDown || tool === 'pan'
+      ? 'grab'
+      : armed
+        ? 'copy'
+        : tool === 'text'
+          ? 'text'
+          : tool === 'select'
+            ? 'default'
+            : 'crosshair';
   const scaleBarPx = metersToBoard(map, 10) * view.scale;
 
   return (
@@ -563,7 +737,75 @@ export default function Board() {
               {draft?.kind === 'area' && (
                 <Circle x={draft.x} y={draft.y} radius={draft.r} fill={withAlpha(color, 0.22)} stroke={color} strokeWidth={2} listening={false} />
               )}
+              {draft?.kind === 'rect' && (
+                <Rect
+                  x={Math.min(draft.x0, draft.x1)}
+                  y={Math.min(draft.y0, draft.y1)}
+                  width={Math.abs(draft.x1 - draft.x0)}
+                  height={Math.abs(draft.y1 - draft.y0)}
+                  fill={withAlpha(color, 0.22)}
+                  stroke={color}
+                  strokeWidth={2}
+                  listening={false}
+                />
+              )}
+              {draft?.kind === 'polygon' && (
+                <Group listening={false}>
+                  <Line
+                    points={draft.cursor ? [...draft.points, draft.cursor.x, draft.cursor.y] : draft.points}
+                    closed={draft.points.length >= 4}
+                    fill={withAlpha(color, 0.18)}
+                    stroke={color}
+                    strokeWidth={2}
+                    dash={[6, 4]}
+                    lineJoin="round"
+                  />
+                  {Array.from({ length: draft.points.length / 2 }, (_, i) => (
+                    <Circle key={i} x={draft.points[i * 2]} y={draft.points[i * 2 + 1]} radius={i === 0 ? 5 : 3.5} fill={i === 0 ? '#ece8e1' : color} stroke="#0f1923" strokeWidth={1} />
+                  ))}
+                </Group>
+              )}
+              {lineupsOpen && (
+                <Group listening={!picking && !armed}>
+                  {lineupMarkers.map((l) => (
+                    <LineupMarker
+                      key={l.id}
+                      id={l.id}
+                      agentId={l.agentId}
+                      slot={l.slot}
+                      stand={l.stand}
+                      land={l.land}
+                      rot={rot}
+                      active={l.id === activeLineupId}
+                      dimmed={!!lineupDraft || (!!activeLineupId && l.id !== activeLineupId)}
+                    />
+                  ))}
+                  {lineupDraft && lineupDraft.mapId === plan.mapId && (
+                    <LineupMarker id="draft" agentId={lineupDraft.agentId} slot={lineupDraft.slot} stand={lineupDraft.stand} land={lineupDraft.land} rot={rot} active dimmed={false} />
+                  )}
+                </Group>
+              )}
             </Group>
+            <Transformer
+              ref={trRef}
+              name="transformer selection-ui"
+              rotateEnabled={false}
+              flipEnabled={false}
+              keepRatio={resizable?.kind === 'image'}
+              enabledAnchors={
+                resizable?.kind === 'image'
+                  ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+                  : ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']
+              }
+              anchorSize={8}
+              anchorStroke="#ece8e1"
+              anchorFill="#0f1923"
+              borderStroke="#ece8e1"
+              borderDash={[4, 3]}
+              ignoreStroke
+              boundBoxFunc={(oldBox, box) => (Math.abs(box.width) < 8 || Math.abs(box.height) < 8 ? oldBox : box)}
+              onTransformEnd={onTransformEnd}
+            />
           </Layer>
         </Stage>
       )}
@@ -626,6 +868,10 @@ export default function Board() {
       </div>
 
       {armed && <div className="board-hint">Click the map to place · Shift+click to place several · Esc to cancel</div>}
+      {picking && <div className="board-hint board-hint--pick">{picking === 'stand' ? 'Click where you stand to throw' : 'Click where the utility lands'}</div>}
+      {tool === 'polygon' && draft?.kind === 'polygon' && (
+        <div className="board-hint">Click to add corners · click the first corner, double-click or Enter to finish · Backspace removes the last</div>
+      )}
       {playback && <div className="board-hint board-hint--live">Playing step {playback.to + 1} of {plan.steps.length}</div>}
     </div>
   );
