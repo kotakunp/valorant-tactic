@@ -1,0 +1,17 @@
+# Nixpacks build plan (used by Dokploy's "Nixpacks" build type).
+# Builds the Vite app and serves the static dist/ folder with `serve` on $PORT (default 3000).
+
+providers = ["node"]
+
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+
+[phases.install]
+# Nixpacks sets NODE_ENV=production, which would skip Vite and TypeScript (dev dependencies).
+cmds = ["npm ci --include=dev"]
+
+[phases.build]
+cmds = ["npm run build", "npm prune --omit=dev"]
+
+[start]
+cmd = "npm start"
