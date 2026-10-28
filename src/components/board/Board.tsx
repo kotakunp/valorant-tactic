@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Arrow, Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import { useCanvasImage } from '../../lib/canvasImage';
-import { Maximize, Minus, Plus, RotateCcw, RotateCw } from 'lucide-react';
+import { Maximize, Minus, Plus, RotateCcw, RotateCw, Trash2, X } from 'lucide-react';
 import { usePlan, useCurrentStep, type Rotation } from '../../store/planStore';
 import { useGameData } from '../../store/gameData';
 import { BOARD, calloutLabel, metersToBoard, worldToBoard } from '../../lib/geo';
@@ -20,7 +20,7 @@ import { snapToFloor } from '../../lib/floor';
 import type { RouteFn } from '../../lib/elements';
 import { useLineups } from '../../store/lineupStore';
 import { filterLineups } from '../../lib/lineups';
-import { addImageFiles, addLineupImages } from '../../lib/actions';
+import { addImageFiles, addLineupImages, describePieces, removePieces } from '../../lib/actions';
 import { imageFromClipboard } from '../../lib/images';
 import { LineupMarker } from './LineupOverlay';
 import { PeerOverlay } from './Presence';
@@ -50,6 +50,9 @@ interface View {
   x: number;
   y: number;
 }
+
+/** Where a dragged piece would go if dropped now; either one removes it. */
+type DropTarget = 'trash' | 'palette' | null;
 
 const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 const ROTATION_SHORTCUTS: ShortcutId[] = ['rot0', 'rot90', 'rot180', 'rot270'];
@@ -92,6 +95,10 @@ export default function Board() {
   const coneCache = useRef(new Map<string, number[]>());
   const trRef = useRef<Konva.Transformer>(null);
   const [routeDrag, setRouteDrag] = useState<{ id: string; x: number; y: number } | null>(null);
+  const pieceDrag = useRef<{ id: string; over: DropTarget; opacity: number } | null>(null);
+  const [dragging, setDragging] = useState<{ id: string; over: DropTarget } | null>(null);
+  const trashRef = useRef<HTMLDivElement>(null);
+  const [removeAt, setRemoveAt] = useState<{ x: number; y: number } | null>(null);
 
   const plan = usePlan((s) => s.plan);
   const stepIndex = usePlan((s) => s.stepIndex);
@@ -124,7 +131,8 @@ export default function Board() {
   const liveActive = useCollab((s) => s.active);
   const liveReady = useCollab((s) => s.ready);
   const viewOnly = useCollab((s) => s.active && s.role === 'view');
-  const interactive = tool === 'select' && !playback && !armed && !spaceDown && !viewOnly && (!liveActive || liveReady);
+  const canEdit = !playback && !viewOnly && (!liveActive || liveReady);
+  const interactive = tool === 'select' && !armed && !spaceDown && canEdit;
   // A string, so cursor-only presence updates don't re-render the board.
   const peerDragKey = useCollab((s) => JSON.stringify(s.peers.flatMap((p) => (p.drag && p.step === stepIndex ? [p.drag] : []))));
 
@@ -295,6 +303,55 @@ export default function Board() {
     const id = findElementId(node, stageRef.current);
     if (id) usePlan.getState().removeElement(id);
   };
+
+  const onContextMenu = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    e.evt.preventDefault();
+    if (armed) return actions.setArmed(null);
+    if (!canEdit || draftRef.current) return;
+    const id = findElementId(e.target, stageRef.current);
+    if (id) removePieces([id]);
+  };
+
+  const dropTargetAt = (): DropTarget => {
+    const p = stageRef.current?.getPointerPosition();
+    const box = containerRef.current?.getBoundingClientRect();
+    if (!p || !box) return null;
+    const x = box.left + p.x;
+    const y = box.top + p.y;
+    const inside = (r?: DOMRect) => !!r && r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    if (inside(trashRef.current?.getBoundingClientRect())) return 'trash';
+    if (inside(document.querySelector('.sidebar-left')?.getBoundingClientRect())) return 'palette';
+    return null;
+  };
+
+  const onPieceDragStart = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (!e.target.hasName('element')) return;
+    pieceDrag.current = { id: e.target.id(), over: null, opacity: e.target.opacity() };
+    setDragging({ id: e.target.id(), over: null });
+  };
+
+  const onPieceDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    const d = pieceDrag.current;
+    if (!d || e.target.id() !== d.id) return;
+    const over = dropTargetAt();
+    if (over === d.over) return;
+    d.over = over;
+    e.target.opacity(over ? d.opacity * 0.35 : d.opacity);
+    setDragging({ id: d.id, over });
+  };
+
+  /** Runs after the piece's own dragend handler, which reads pieceDrag to decide between moving and removing. */
+  const onPieceDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
+    const d = pieceDrag.current;
+    if (!d || e.target.id() !== d.id) return;
+    e.target.opacity(d.opacity);
+    pieceDrag.current = null;
+    setDragging(null);
+  };
+
+  useEffect(() => {
+    document.querySelector('.sidebar-left')?.classList.toggle('drop-remove', dragging?.over === 'palette');
+  }, [dragging?.over]);
 
   const onPointerDown = (e: Konva.KonvaEventObject<PointerEvent>) => {
     if (playback || spaceDown || tool === 'pan' || e.evt.button === 1 || e.evt.button === 2) return;
@@ -558,7 +615,10 @@ export default function Board() {
     return map.callouts.map((c, i) => ({ key: i, label: calloutLabel(c.superRegionName, c.regionName), ...worldToBoard(map, c.location.x, c.location.y) }));
   }, [map]);
 
-  const onChangeFor = (id: string) => (patch: Partial<BoardEl>, key?: string) => actions.updateElement(id, patch, key);
+  const onChangeFor = (id: string) => (patch: Partial<BoardEl>, key?: string) => {
+    if (pieceDrag.current?.id === id && pieceDrag.current.over) removePieces([id]);
+    else actions.updateElement(id, patch, key);
+  };
   const onLiveFor = (id: string) => (pos: { x: number; y: number } | null) => {
     setLive(pos ? { id, ...pos } : null);
     if (!liveActive) return;
@@ -570,6 +630,32 @@ export default function Board() {
 
   const selectedEl = selectedId ? step.elements.find((el) => el.id === selectedId) : undefined;
   const resizable = interactive && !lineupsOpen && (selectedEl?.kind === 'rect' || selectedEl?.kind === 'image') ? selectedEl : null;
+  const showRemove = interactive && !!selectedEl && !dragging && !routeDrag && !textEdit && !live;
+
+  // Measured after Konva has the latest node positions, in board-container pixels.
+  useLayoutEffect(() => {
+    let next: { x: number; y: number } | null = null;
+    if (showRemove && selectedEl) {
+      if (selectedEl.kind === 'agent' || selectedEl.kind === 'ability' || selectedEl.kind === 'object') {
+        // Tokens stay upright on screen, so offset from the rotated centre rather than the node's bounds,
+        // which also include the aim and size handles.
+        const c = BOARD / 2;
+        const a = (rot * Math.PI) / 180;
+        const dx = selectedEl.x - c;
+        const dy = selectedEl.y - c;
+        const sx = view.x + view.scale * (c + dx * Math.cos(a) - dy * Math.sin(a));
+        const sy = view.y + view.scale * (c + dx * Math.sin(a) + dy * Math.cos(a));
+        const half = (selectedEl.kind === 'agent' ? agentR + 7 : selectedEl.kind === 'ability' ? 12 * settings.iconScale + 5 : 13 * settings.iconScale + 6) * view.scale;
+        const k = selectedEl.kind === 'agent' ? Math.SQRT1_2 : 1;
+        next = { x: sx + half * k, y: sy - half * k };
+      } else {
+        const r = stageRef.current?.findOne('#' + selectedEl.id)?.getClientRect({ skipShadow: true });
+        // Clear of the resize handle that sits on the corner of zones and images.
+        if (r) next = { x: r.x + r.width + 10, y: r.y - 10 };
+      }
+    }
+    setRemoveAt((p) => (p && next && Math.abs(p.x - next.x) < 0.5 && Math.abs(p.y - next.y) < 0.5 ? p : next));
+  }, [showRemove, selectedEl, view, rot, agentR, settings.iconScale, size]);
 
   useEffect(() => {
     const tr = trRef.current;
@@ -631,9 +717,13 @@ export default function Board() {
           x={view.x}
           y={view.y}
           draggable={spaceDown || tool === 'pan'}
+          onDragStart={onPieceDragStart}
+          onDragMove={onPieceDragMove}
           onDragEnd={(e) => {
             if (e.target === stageRef.current) setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }));
+            else onPieceDragEnd(e);
           }}
+          onContextMenu={onContextMenu}
           onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -955,6 +1045,24 @@ export default function Board() {
           }}
           onBlur={commitText}
         />
+      )}
+
+      {showRemove && removeAt && selectedEl && (
+        <button
+          className="board-remove"
+          style={{ left: removeAt.x, top: removeAt.y }}
+          onClick={() => removePieces([selectedEl.id])}
+          {...tip(`Remove ${describePieces([selectedEl])}`, 'delete', 'top')}
+        >
+          <X size={13} strokeWidth={3} />
+        </button>
+      )}
+
+      {dragging && (
+        <div ref={trashRef} className={`board-trash ${dragging.over ? 'on' : ''}`}>
+          <Trash2 size={16} />
+          {dragging.over ? 'Release to remove' : 'Drop here or on the left panel to remove'}
+        </div>
       )}
 
       {map && (

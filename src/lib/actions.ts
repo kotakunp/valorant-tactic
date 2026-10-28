@@ -5,7 +5,8 @@ import { boardApi, exportBoardPng } from './boardApi';
 import { planHasImages, planToShareUrl } from './share';
 import { encodeImage } from './images';
 import { uid } from './ids';
-import type { ImageEl } from '../types';
+import type { BoardEl, ImageEl } from '../types';
+import { OBJECTS } from './objects';
 import { dataUrlToBlob, uploadImage } from '../collab/api';
 import { liveRoomToken } from '../collab/session';
 
@@ -57,6 +58,49 @@ export async function addLineupImages(files: File[]) {
   if (current && srcs.length) useLineups.getState().updateDraft({ images: [...current.images, ...srcs].slice(0, MAX_LINEUP_IMAGES) });
 }
 
+const KIND_NAMES: Record<BoardEl['kind'], [string, string]> = {
+  agent: ['agent', 'agents'],
+  ability: ['ability', 'abilities'],
+  object: ['marker', 'markers'],
+  stroke: ['drawing', 'drawings'],
+  text: ['note', 'notes'],
+  area: ['area', 'areas'],
+  rect: ['zone', 'zones'],
+  polygon: ['zone', 'zones'],
+  image: ['image', 'images'],
+};
+
+/** "Jett", "Jett's Updraft", "3 abilities", "5 pieces". */
+export function describePieces(els: BoardEl[]): string {
+  const { agentsById } = useGameData.getState();
+  if (els.length === 1) {
+    const el = els[0];
+    if (el.kind === 'agent') return agentsById[el.agentId]?.displayName ?? 'agent';
+    if (el.kind === 'ability') {
+      const agent = agentsById[el.agentId];
+      const ability = agent?.abilities.find((a) => a.slot === el.slot);
+      return ability ? `${agent.displayName}'s ${ability.displayName}` : 'ability';
+    }
+    if (el.kind === 'object') return `${OBJECTS.find((o) => o.kind === el.object)?.label ?? 'marker'} marker`;
+    return KIND_NAMES[el.kind][0];
+  }
+  const names = new Set(els.map((e) => KIND_NAMES[e.kind][1]));
+  return names.size === 1 ? `${els.length} ${[...names][0]}` : `${els.length} pieces`;
+}
+
+/** Removes pieces from the current step and offers a one-click undo. */
+export function removePieces(ids: string[]) {
+  const s = usePlan.getState();
+  const step = s.plan.steps[s.stepIndex];
+  const wanted = new Set(ids);
+  const els = step?.elements.filter((e) => wanted.has(e.id)) ?? [];
+  if (!els.length) return;
+  s.removeElements(els.map((e) => e.id));
+  const after = usePlan.getState().plan.steps[usePlan.getState().stepIndex];
+  // A refused edit (view-only live link) has already shown its own message.
+  if (after?.elements.some((e) => wanted.has(e.id))) return;
+  s.showToast(`Removed ${describePieces(els)}`, { label: 'Undo', run: () => usePlan.getState().undo() });
+}
 export async function copyShareLink() {
   const s = usePlan.getState();
   const url = planToShareUrl(s.plan);

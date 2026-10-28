@@ -36,6 +36,7 @@ export const SHORTCUTS = {
   redo: { label: 'Redo', keys: ['Mod+Shift+Z', 'Mod+Y'] },
   duplicate: { label: 'Duplicate selection', keys: ['Mod+D'] },
   delete: { label: 'Delete selection', keys: ['Delete', 'Backspace'] },
+  remove: { label: 'Remove a piece (or drag it to the trash)', keys: ['Right-click'] },
   deselect: { label: 'Cancel placing / deselect', keys: ['Esc'] },
   turnLeft: { label: 'Turn agent left (Shift = 5°)', keys: ['['] },
   turnRight: { label: 'Turn agent right (Shift = 5°)', keys: [']'] },
@@ -68,7 +69,7 @@ export type ShortcutId = keyof typeof SHORTCUTS;
 export const SHORTCUT_GROUPS: { title: string; ids: ShortcutId[] }[] = [
   { title: 'Tools', ids: ['select', 'pan', 'pen', 'line', 'area', 'rect', 'polygon', 'text', 'eraser', 'image'] },
   { title: 'Drawing', ids: ['arrow', 'dashed', 'color', 'width', 'team'] },
-  { title: 'Editing', ids: ['undo', 'redo', 'duplicate', 'delete', 'deselect', 'turnLeft', 'turnRight'] },
+  { title: 'Editing', ids: ['undo', 'redo', 'duplicate', 'delete', 'remove', 'deselect', 'turnLeft', 'turnRight'] },
   { title: 'Steps', ids: ['prevStep', 'nextStep', 'newStep', 'blankStep', 'play'] },
   { title: 'View', ids: ['rotateCw', 'rotateCcw', 'rot0', 'rot90', 'rot180', 'rot270', 'fit', 'zoomIn', 'zoomOut'] },
   { title: 'Strategy', ids: ['maps', 'library', 'lineups', 'newPlan', 'save', 'share', 'exportPng', 'help'] },

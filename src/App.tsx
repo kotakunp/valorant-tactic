@@ -14,7 +14,7 @@ import ShortcutsModal from './components/ShortcutsModal';
 import LineupsPanel from './components/LineupsPanel';
 import LiveModal from './components/LiveModal';
 import { initCollab } from './collab/session';
-import { addImageFiles, copyShareLink, exportPng, startNewPlan } from './lib/actions';
+import { addImageFiles, copyShareLink, exportPng, removePieces, startNewPlan } from './lib/actions';
 import { pickImageFiles } from './lib/images';
 import { useLineups } from './store/lineupStore';
 import { togglePlayback } from './lib/playback';
@@ -114,7 +114,7 @@ export default function App() {
       if (key === 'u' && !e.shiftKey) return run(() => useLineups.getState().setOpen(!useLineups.getState().open));
       if (s.playback) return;
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && s.selectedId) run(() => s.removeElement(s.selectedId!));
+      if ((e.key === 'Delete' || e.key === 'Backspace') && s.selectedId) run(() => removePieces([s.selectedId!]));
       else if (e.key === 'ArrowLeft') run(() => s.setStepIndex(s.stepIndex - 1));
       else if (e.key === 'ArrowRight') run(() => s.setStepIndex(s.stepIndex + 1));
       else if (TOOL_KEYS[key] && !e.shiftKey) s.setTool(TOOL_KEYS[key]);

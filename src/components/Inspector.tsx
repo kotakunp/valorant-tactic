@@ -11,6 +11,7 @@ import { navFor, useOccupancy } from '../lib/vision';
 import { previousSpot, routeCallouts, routeStats, sameVia, walkOptions, walkRoute } from '../lib/routes';
 import type { ApiAgent } from '../api/valorant';
 import { tip, tipFor } from '../lib/shortcuts';
+import { removePieces } from '../lib/actions';
 import { Keyboard } from 'lucide-react';
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -376,7 +377,7 @@ function Selection({ el }: { el: BoardEl }) {
           <button className="icon-btn" {...tipFor('duplicate')} onClick={() => a.duplicateElement(el.id)}>
             <Copy size={15} />
           </button>
-          <button className="icon-btn danger" {...tipFor('delete')} onClick={() => a.removeElement(el.id)}>
+          <button className="icon-btn danger" {...tipFor('delete')} onClick={() => removePieces([el.id])}>
             <Trash2 size={15} />
           </button>
         </div>

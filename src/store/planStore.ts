@@ -47,7 +47,7 @@ interface PlanState {
   past: Plan[];
   future: Plan[];
   playback: Playback | null;
-  toast: { id: number; message: string } | null;
+  toast: { id: number; message: string; action?: ToastAction } | null;
 
   setTool: (tool: Tool) => void;
   setTeam: (team: Team) => void;
@@ -65,8 +65,8 @@ interface PlanState {
   placePayload: (payload: PalettePayload, pos: { x: number; y: number }) => void;
   updateElement: (id: string, patch: Partial<BoardEl>, coalesceKey?: string) => void;
   removeElement: (id: string) => void;
+  removeElements: (ids: string[]) => void;
   duplicateElement: (id: string) => void;
-  clearStep: () => void;
 
   setMap: (mapId: string) => void;
   setSide: (side: Side) => void;
@@ -95,7 +95,12 @@ interface PlanState {
   setLive: (live: LiveLink | undefined) => void;
 
   setPlayback: (p: Playback | null) => void;
-  showToast: (message: string) => void;
+  showToast: (message: string, action?: ToastAction) => void;
+}
+
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 /**
@@ -230,10 +235,14 @@ export const usePlan = create<PlanState>()(
             (els) => els.map((el) => (el.id === id ? ({ ...el, ...patch } as BoardEl) : el)),
             coalesceKey,
           ),
-        removeElement: (id) =>
-          mutateElements((els) => els.filter((el) => el.id !== id), undefined, {
-            selectedId: get().selectedId === id ? null : get().selectedId,
-          }),
+        removeElement: (id) => get().removeElements([id]),
+        removeElements: (ids) => {
+          const gone = new Set(ids);
+          const selectedId = get().selectedId;
+          mutateElements((els) => els.filter((el) => !gone.has(el.id)), undefined, {
+            selectedId: selectedId && gone.has(selectedId) ? null : selectedId,
+          });
+        },
         duplicateElement: (id) => {
           const src = get().plan.steps[get().stepIndex]?.elements.find((e) => e.id === id);
           if (!src) return;
@@ -243,7 +252,6 @@ export const usePlan = create<PlanState>()(
               : ({ ...src, id: uid(), x: src.x + 20, y: src.y + 20 } as BoardEl);
           get().addElement(copy);
         },
-        clearStep: () => mutateElements(() => [], undefined, { selectedId: null }),
 
         setMap: (mapId) => {
           const { plan } = get();
@@ -389,7 +397,7 @@ export const usePlan = create<PlanState>()(
           }),
 
         setPlayback: (playback) => set({ playback }),
-        showToast: (message) => set({ toast: { id: Date.now(), message } }),
+        showToast: (message, action) => set({ toast: { id: Date.now(), message, action } }),
       };
     },
     {
