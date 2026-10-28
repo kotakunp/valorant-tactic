@@ -21,7 +21,8 @@ import { togglePlayback } from './lib/playback';
 import { DRAW_COLORS, STROKE_WIDTHS } from './lib/colors';
 import { useGameData } from './store/gameData';
 import { usePlan, type Rotation } from './store/planStore';
-import { clearShareHash, readSharedPlan } from './lib/share';
+import { clearShareLink, fetchSharedPlan, readShareLink } from './lib/share';
+import type { Plan } from './types';
 import { boardApi } from './lib/boardApi';
 import { normalizeAngle } from './lib/elements';
 import type { Tool } from './types';
@@ -56,17 +57,23 @@ export default function App() {
     if (status !== 'ready') return;
     const { maps, mapsById } = useGameData.getState();
     const plans = usePlan.getState();
-    const shared = readSharedPlan();
-    let loaded = false;
-    if (shared) {
-      clearShareHash();
-      if (mapsById[shared.mapId]) {
+    const openShared = (shared: Plan | null): boolean => {
+      clearShareLink();
+      if (!shared) plans.showToast('That share link is broken or no longer exists');
+      else if (!mapsById[shared.mapId]) plans.showToast('That share link points to a map that is no longer available');
+      else {
         plans.loadPlan(shared);
         plans.showToast('Shared strategy loaded');
-        loaded = true;
-      } else {
-        plans.showToast('That share link points to a map that is no longer available');
+        return true;
       }
+      return false;
+    };
+    const link = readShareLink();
+    let loaded = false;
+    if (link?.kind === 'hash') loaded = openShared(link.plan);
+    else if (link?.kind === 'short') {
+      // The link stays in the address bar on a network error so reloading tries again.
+      fetchSharedPlan(link.id).then(openShared, () => plans.showToast("Couldn't reach the server to open that share link. Check your connection and reload."));
     }
     const plan = usePlan.getState().plan;
     if (!loaded && !mapsById[plan.mapId]) {

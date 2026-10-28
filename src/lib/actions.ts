@@ -2,7 +2,7 @@ import { usePlan } from '../store/planStore';
 import { useGameData } from '../store/gameData';
 import { useLineups, MAX_LINEUP_IMAGES } from '../store/lineupStore';
 import { boardApi, exportBoardPng } from './boardApi';
-import { planHasImages, planToShareUrl } from './share';
+import { createShortShareUrl, planHasImages, planToShareUrl } from './share';
 import { encodeImage } from './images';
 import { uid } from './ids';
 import type { BoardEl, ImageEl } from '../types';
@@ -101,18 +101,56 @@ export function removePieces(ids: string[]) {
   if (after?.elements.some((e) => wanted.has(e.id))) return;
   s.showToast(`Removed ${describePieces(els)}`, { label: 'Undo', run: () => usePlan.getState().undo() });
 }
-export async function copyShareLink() {
-  const s = usePlan.getState();
-  const url = planToShareUrl(s.plan);
+
+/**
+ * Copies text that is still being produced. Browsers only allow clipboard writes shortly after a click,
+ * so the pending text goes straight into a ClipboardItem where that's supported.
+ */
+async function copyPending(text: Promise<string>): Promise<boolean> {
+  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) })]);
+      return true;
+    } catch {
+      // Older engines reject promised clipboard items; try plain text below.
+    }
+  }
   try {
-    await navigator.clipboard.writeText(url);
-    s.showToast(
-      planHasImages(s.plan)
-        ? 'Share link copied without images. Export a file from the Library to share them too.'
-        : 'Share link copied. Anyone with it gets their own copy.',
-    );
+    await navigator.clipboard.writeText(await text);
+    return true;
   } catch {
-    window.prompt('Copy this share link', url);
+    return false;
+  }
+}
+
+let sharing = false;
+
+export async function copyShareLink() {
+  if (sharing) return;
+  sharing = true;
+  const s = usePlan.getState();
+  const plan = s.plan;
+  let offline = false;
+  const link = createShortShareUrl(plan).catch(() => {
+    offline = true;
+    return planToShareUrl(plan);
+  });
+  try {
+    const copied = await copyPending(link);
+    const url = await link;
+    if (!copied) {
+      window.prompt('Copy this share link', url);
+      return;
+    }
+    s.showToast(
+      !offline
+        ? 'Share link copied. Anyone with it gets their own copy.'
+        : planHasImages(plan)
+          ? "Couldn't reach the server, so this is a long link without images."
+          : "Couldn't reach the server, so this is a long offline link.",
+    );
+  } finally {
+    sharing = false;
   }
 }
 

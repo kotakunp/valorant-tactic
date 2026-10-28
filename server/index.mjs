@@ -14,15 +14,22 @@ const DIST = path.join(ROOT, 'dist');
 const DATA = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const ROOMS = path.join(DATA, 'rooms');
 const MEDIA = path.join(DATA, 'media');
+const SHARES = path.join(DATA, 'shares');
 const PORT = Number(process.env.PORT) || 3000;
 
 const MAX_DOC_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+/** A share request carries its images inline; once they're moved to /media the plan itself is small. */
+const MAX_SHARE_REQUEST_BYTES = 16 * 1024 * 1024;
+const MAX_SHARE_PLAN_BYTES = 1024 * 1024;
+const SHARE_RE = /^[A-Za-z0-9_-]{10}$/;
+const DATA_IMAGE_RE = /^data:image\/[a-z+.-]+;base64,([A-Za-z0-9+/]+=*)$/;
 const ROOM_RE = /^[A-Za-z0-9_-]{16}$/;
 const MEDIA_RE = /^[a-f0-9]{32}\.(webp|jpg|png)$/;
+const MEDIA_SRC_RE = /^\/media\/[a-f0-9]{32}\.(webp|jpg|png)$/;
 const MEDIA_TYPES = { webp: 'image/webp', jpg: 'image/jpeg', png: 'image/png' };
 
-for (const dir of [ROOMS, MEDIA]) mkdirSync(dir, { recursive: true });
+for (const dir of [ROOMS, MEDIA, SHARES]) mkdirSync(dir, { recursive: true });
 
 /** Room links are HMACs of the room id, so the server keeps no token table. Losing the secret invalidates every link. */
 function loadSecret() {
@@ -117,6 +124,65 @@ function imageType(buf) {
   return null;
 }
 
+/** Saves image bytes under their content hash and returns the /media URL, or null if they aren't an image. */
+async function storeImage(buf) {
+  const ext = imageType(buf);
+  if (!ext) return null;
+  const name = `${createHash('sha256').update(buf).digest('hex').slice(0, 32)}.${ext}`;
+  const file = path.join(MEDIA, name);
+  if (!existsSync(file)) await writeAtomic(file, buf);
+  return `/media/${name}`;
+}
+
+class BadShare extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/**
+ * Freezes a strategy and returns its short id. Ids are content hashes, so sharing the same
+ * strategy twice gives the same link and nothing is ever overwritten.
+ */
+async function createShare(body) {
+  let plan;
+  try {
+    plan = JSON.parse(body.toString('utf8'));
+  } catch {
+    throw new BadShare('That is not a strategy');
+  }
+  if (!plan || typeof plan !== 'object' || typeof plan.mapId !== 'string' || !Array.isArray(plan.steps)) throw new BadShare('That is not a strategy');
+  if (!plan.steps.length || plan.steps.length > 200) throw new BadShare('That is not a strategy');
+  // Library details, session credentials and timestamps stay private (and would defeat de-duplication).
+  const { id: _id, folder: _folder, tags: _tags, live: _live, updatedAt: _updatedAt, ...rest } = plan;
+  for (const step of rest.steps) {
+    if (!step || typeof step !== 'object' || !Array.isArray(step.elements)) throw new BadShare('That is not a strategy');
+    const kept = [];
+    for (const el of step.elements) {
+      if (el?.kind === 'image') {
+        const m = typeof el.src === 'string' ? el.src.match(DATA_IMAGE_RE) : null;
+        if (m) {
+          const buf = Buffer.from(m[1], 'base64');
+          const url = buf.length <= MAX_IMAGE_BYTES ? await storeImage(buf) : null;
+          if (!url) continue;
+          el.src = url;
+        } else if (typeof el.src !== 'string' || !MEDIA_SRC_RE.test(el.src)) {
+          continue;
+        }
+      }
+      kept.push(el);
+    }
+    step.elements = kept;
+  }
+  const json = JSON.stringify(rest);
+  if (Buffer.byteLength(json) > MAX_SHARE_PLAN_BYTES) throw new BadShare('That strategy is too large to share as a link', 413);
+  const id = createHash('sha256').update(json).digest('base64url').slice(0, 10);
+  const file = path.join(SHARES, `${id}.json`);
+  if (!existsSync(file)) await writeAtomic(file, json);
+  return id;
+}
+
 const statics = existsSync(DIST)
   ? sirv(DIST, {
       single: true,
@@ -148,12 +214,38 @@ async function handleApi(req, res, url) {
     } catch (err) {
       return send(res, err.status ?? 400, { error: err.status === 413 ? 'That image is too large' : 'Upload failed' });
     }
-    const ext = imageType(body);
-    if (!ext) return send(res, 415, { error: 'Only WebP, JPEG and PNG images are supported' });
-    const name = `${createHash('sha256').update(body).digest('hex').slice(0, 32)}.${ext}`;
-    const file = path.join(MEDIA, name);
-    if (!existsSync(file)) await writeAtomic(file, body);
-    return send(res, 201, { url: `/media/${name}` });
+    const src = await storeImage(body);
+    if (!src) return send(res, 415, { error: 'Only WebP, JPEG and PNG images are supported' });
+    return send(res, 201, { url: src });
+  }
+
+  if (url.pathname === '/api/shares' && req.method === 'POST') {
+    if (limited(req, 'shares', 60, 10 * 60_000)) return send(res, 429, { error: 'Too many share links. Try again in a few minutes.' });
+    try {
+      const id = await createShare(await readBody(req, MAX_SHARE_REQUEST_BYTES));
+      return send(res, 201, { id });
+    } catch (err) {
+      if (err instanceof BadShare) return send(res, err.status, { error: err.message });
+      if (err.status === 413) return send(res, 413, { error: 'That strategy is too large to share as a link' });
+      throw err;
+    }
+  }
+
+  const share = url.pathname.match(/^\/api\/shares\/([A-Za-z0-9_-]+)$/);
+  if (share && req.method === 'GET') {
+    if (!SHARE_RE.test(share[1])) return send(res, 404, { error: 'Not found' });
+    let json;
+    try {
+      json = await readFile(path.join(SHARES, `${share[1]}.json`));
+    } catch {
+      return send(res, 404, { error: 'That share link does not exist' });
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      // The id is a hash of the content, so a share never changes.
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+    return res.end(json);
   }
 
   return send(res, 404, { error: 'Not found' });

@@ -18,7 +18,7 @@ A Valorant strategy planner in the spirit of valoplant.gg. You plan on the real 
 ## Saving and sharing
 
 - **Autosave:** every change is written to this browser's localStorage immediately. Closing the tab, reloading or restarting the browser keeps your work. Every strategy you've touched is listed in the **Library** (`Ctrl/⌘+O`), where you can sort them into folders, tag them, and search or filter by map, side and tag. Open tabs keep their libraries in sync.
-- **Share link** (`Ctrl/⌘+Shift+S`): copies a URL with the whole strategy compressed into it. Whoever opens it gets their own copy in their Library. Nothing is uploaded; the link is the data. Images are left out to keep links short, so use a file export to share a strategy with images.
+- **Share link** (`Ctrl/⌘+Shift+S`): copies a short link (`/s/…`) to a frozen copy of the strategy stored on the server, images included. Whoever opens it gets their own copy in their Library. Later edits don't change a link you already sent, so share again after changing the plan. If the server can't be reached, you get a long link with the whole strategy compressed into it instead (without images). Both kinds keep working.
 - **File export/import:** in the Library, export any strategy as a `.json` file and import it on another device or browser. Use this as a backup.
 
 Images are downscaled before they're stored, but localStorage is limited to a few megabytes per site. If it fills up you get a warning; delete old strategies, lineups or images to make room.
@@ -51,7 +51,7 @@ npm start            # production server on $PORT (default 3000)
 
 Stack: Vite, React 19, TypeScript, Konva (react-konva), Zustand, lz-string, Yjs with Hocuspocus for live sessions.
 
-`server/index.mjs` is a single Node process. It serves `dist/` (SPA fallback, immutable caching for hashed assets), the Hocuspocus WebSocket at `/collab`, `POST /api/rooms` (new room and its edit/view tokens), image uploads (`POST /api/rooms/:room/media`, editors only, WebP/JPEG/PNG up to 3 MB) and `/media/*`. Rooms are saved as Yjs updates in `data/rooms/`, images in `data/media/`. Set `DATA_DIR` to move that folder, and `COLLAB_SECRET` to choose the link-signing secret (otherwise one is generated in `data/secret`; losing it invalidates every link).
+`server/index.mjs` is a single Node process. It serves `dist/` (SPA fallback, immutable caching for hashed assets), the Hocuspocus WebSocket at `/collab`, `POST /api/rooms` (new room and its edit/view tokens), image uploads (`POST /api/rooms/:room/media`, editors only, WebP/JPEG/PNG up to 3 MB), share links (`POST /api/shares` stores a strategy and moves its embedded images to `/media`; `GET /api/shares/:id` reads it back) and `/media/*`. Rooms are saved as Yjs updates in `data/rooms/`, shared strategies as JSON in `data/shares/` (named by a hash of their content), images in `data/media/`. Set `DATA_DIR` to move that folder, and `COLLAB_SECRET` to choose the link-signing secret (otherwise one is generated in `data/secret`; losing it invalidates every link).
 
 ## Deploy (Dokploy + Nixpacks)
 
@@ -59,7 +59,7 @@ Stack: Vite, React 19, TypeScript, Konva (react-konva), Zustand, lz-string, Yjs 
 
 1. In Dokploy, create an **Application** and connect this repository.
 2. Set **Build Type** to **Nixpacks**.
-3. Under **Advanced → Volumes**, add a volume mounted at **`/app/data`**. Without it, live sessions, uploaded images and the link secret are lost on every redeploy.
+3. Under **Advanced → Volumes**, add a volume mounted at **`/app/data`**. Without it, live sessions, share links, uploaded images and the link secret are lost on every redeploy.
 4. Under **Domains**, add your domain with container port **3000**. To use another port, set a `PORT` environment variable and use the same number for the domain. Traefik passes WebSockets through without extra settings.
 5. Deploy.
 
