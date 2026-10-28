@@ -472,6 +472,7 @@ export default function Inspector({ onOpenHelp }: { onOpenHelp: () => void }) {
         </div>
         <div className="stack">
           <Toggle label="Callouts" checked={settings.showCallouts} onChange={(v) => a.setSettings({ showCallouts: v })} />
+          <Toggle label="Spawn barriers" checked={settings.showBarriers} onChange={(v) => a.setSettings({ showBarriers: v })} />
           <Toggle label="Ability ranges" checked={settings.showRanges} onChange={(v) => a.setSettings({ showRanges: v })} />
           <Toggle label="Ghost previous step" checked={settings.onionSkin} onChange={(v) => a.setSettings({ onionSkin: v })} />
           <Toggle label="Vision cones" checked={settings.showVision} onChange={(v) => a.setSettings({ showVision: v })} />

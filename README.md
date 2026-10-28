@@ -4,7 +4,7 @@ A Valorant strategy planner in the spirit of valoplant.gg. You plan on the real 
 
 ## Features
 
-- **Real game data:** all competitive maps (minimaps, splash art, callouts placed with the API's world-to-minimap transform), every playable agent, and each agent's abilities with official icons and descriptions.
+- **Real game data:** all competitive maps (minimaps, splash art, callouts placed with the API's world-to-minimap transform, spawn barriers coloured by which team they hold back), every playable agent, and each agent's abilities with official icons and descriptions.
 - **Board:** drag or click to place agents, abilities and markers (spike, danger, watch, kill). Draw freehand or straight lines (arrows/dashed), area circles, rectangles (B), polygon zones (G) and text. Add images with the toolbar button (I) or by pasting a screenshot; drag the corners to resize. Erase, zoom (scroll), pan (Space/H), rotate the map (R).
 - **Ability shapes at map scale:** each ability can show a radius (smokes, mollies), a wall (Viper, Harbor, Sage), a cone (Spycam, turret, Rolling Thunder), an area strip (Fault Line, Fast Lane) or a line (Trapwire, Cosmic Divide), measured in meters and converted per map. Drag the handle to resize or aim. Defaults for common utility are approximate and editable.
 - **Lineups** (U): save where to stand and where utility lands for each agent and map, with up to three screenshots, a video link and notes. Filter by agent and side, see them as markers on the map, and place one on the current step as an agent aimed at an ability. Export and import lineups as `.json` files.
@@ -69,4 +69,5 @@ To try the production server locally: `npm run build && npm start` (http://local
 
 - Game data and most images: [valorant-api.com](https://valorant-api.com).
 - Corrode's Patch 13.08 minimap (`public/maps/corrode-13.08.webp`): from [ValoMapper](https://github.com/Shafin-A/ValoMapper) by Shafin Ahmed (MIT), rotated into valorant-api.com's frame. valorant-api.com still serves the pre-13.08 layout; remove the override in `src/api/valorant.ts` once it updates.
+- Spawn barrier positions (`src/lib/barriers.ts`): from ValoMapper (MIT), converted from its canvas into valorant-api.com's minimap frame.
 - VALORANT and its assets are trademarks of Riot Games. This project isn't endorsed by Riot Games.

@@ -8,6 +8,7 @@ import { useGameData } from '../../store/gameData';
 import { BOARD, calloutLabel, metersToBoard, worldToBoard } from '../../lib/geo';
 import { tip, tipFor, type ShortcutId } from '../../lib/shortcuts';
 import { TEAM_COLORS, withAlpha } from '../../lib/colors';
+import { SPAWN_BARRIERS } from '../../lib/barriers';
 import { interpolateSteps, type Frame } from '../../lib/elements';
 import { boardApi } from '../../lib/boardApi';
 import { uid } from '../../lib/ids';
@@ -737,6 +738,23 @@ export default function Board() {
             <Group ref={boardRef} x={BOARD / 2} y={BOARD / 2} offsetX={BOARD / 2} offsetY={BOARD / 2} rotation={rot}>
               <Rect ref={bgRef} name="map-bg" width={BOARD} height={BOARD} fill="#0e1822" />
               {mapImg && <KImage name="map-bg" image={mapImg} width={BOARD} height={BOARD} opacity={0.95} />}
+              {settings.showBarriers &&
+                mapImg &&
+                (['attack', 'defense'] as const).map((side) =>
+                  SPAWN_BARRIERS[plan.mapId]?.[side].map((pts, i) => (
+                    <Line
+                      key={`barrier-${side}-${i}`}
+                      points={pts}
+                      stroke={withAlpha(TEAM_COLORS[side === plan.side ? 'ally' : 'enemy'], 0.8)}
+                      strokeWidth={4}
+                      lineCap="round"
+                      shadowColor={TEAM_COLORS[side === plan.side ? 'ally' : 'enemy']}
+                      shadowBlur={6}
+                      shadowOpacity={0.6}
+                      listening={false}
+                    />
+                  )),
+                )}
               {settings.showCallouts &&
                 callouts.map((c) => (
                   <Text

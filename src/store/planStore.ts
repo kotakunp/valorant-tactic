@@ -10,6 +10,8 @@ export type Rotation = 0 | 90 | 180 | 270;
 
 export interface Settings {
   showCallouts: boolean;
+  /** Buy-phase walls, coloured by which team they hold back. */
+  showBarriers: boolean;
   showRanges: boolean;
   onionSkin: boolean;
   rotation: Rotation;
@@ -196,6 +198,7 @@ export const usePlan = create<PlanState>()(
         focusAgentId: null,
         settings: {
           showCallouts: true,
+          showBarriers: true,
           showRanges: true,
           onionSkin: true,
           rotation: 0,
