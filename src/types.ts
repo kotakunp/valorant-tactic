@@ -114,7 +114,7 @@ export interface ImageEl {
   y: number;
   width: number;
   height: number;
-  /** Downscaled data URL, so plans stay self-contained. */
+  /** Downscaled data URL, or a `/media/…` upload in live sessions. */
   src: string;
 }
 
@@ -137,6 +137,18 @@ export interface Plan {
   /** Library folder name; missing means unfiled. */
   folder?: string;
   tags?: string[];
+  /** Set while this strategy is a live session shared through the server. */
+  live?: LiveLink;
+}
+
+export interface LiveLink {
+  room: string;
+  /** Edit or view token from the invite link. */
+  token: string;
+  /** Present when this browser can hand out a view-only link. */
+  viewToken?: string;
+  /** Last role the server granted, so the right controls show while offline. */
+  role?: 'edit' | 'view';
 }
 
 export interface Point {

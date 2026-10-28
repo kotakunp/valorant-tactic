@@ -8,19 +8,24 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev:server": "PORT=3001 node --watch server/index.mjs",
+    "build": "tsc --noEmit && vite build && node server/precompress.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "start": "serve dist --single --no-clipboard --listen tcp://0.0.0.0:${PORT:-3000}"
+    "start": "node server/index.mjs"
   },
   "dependencies": {
+    "@hocuspocus/provider": "^4.7.1",
+    "@hocuspocus/server": "^4.7.1",
     "konva": "^10.9.0",
     "lucide-react": "^1.62.0",
     "lz-string": "^1.5.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-konva": "^19.3.2",
-    "serve": "^14.2.6",
+    "sirv": "^3.0.2",
+    "y-indexeddb": "^9.0.12",
+    "yjs": "^13.6.33",
     "zustand": "^5.0.16"
   },
   "devDependencies": {
@@ -29,8 +34,5 @@
     "@vitejs/plugin-react": "^6.1.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
-  },
-  "overrides": {
-    "compression": "^1.8.2"
   }
 }

@@ -23,6 +23,8 @@ import { filterLineups } from '../../lib/lineups';
 import { addImageFiles, addLineupImages } from '../../lib/actions';
 import { imageFromClipboard } from '../../lib/images';
 import { LineupMarker } from './LineupOverlay';
+import { PeerOverlay } from './Presence';
+import { reportCursor, reportDrag, useCollab } from '../../collab/session';
 
 type Draft =
   | { kind: 'pen'; points: number[] }
@@ -119,7 +121,12 @@ export default function Board() {
   const routeFn: RouteFn = useCallback((a, b) => walkRoute(nav, a, b, b.via), [nav]);
   const constrainAgent = useCallback((p: Point) => snapToFloor(nav, p), [nav]);
   const rot = settings.rotation;
-  const interactive = tool === 'select' && !playback && !armed && !spaceDown;
+  const liveActive = useCollab((s) => s.active);
+  const liveReady = useCollab((s) => s.ready);
+  const viewOnly = useCollab((s) => s.active && s.role === 'view');
+  const interactive = tool === 'select' && !playback && !armed && !spaceDown && !viewOnly && (!liveActive || liveReady);
+  // A string, so cursor-only presence updates don't re-render the board.
+  const peerDragKey = useCollab((s) => JSON.stringify(s.peers.flatMap((p) => (p.drag && p.step === stepIndex ? [p.drag] : []))));
 
   const setDraftBoth = (d: Draft | null) => {
     draftRef.current = d;
@@ -359,6 +366,7 @@ export default function Board() {
   };
 
   const onPointerMove = () => {
+    if (liveActive) reportCursor(boardPos());
     if (erasing.current) {
       const stage = stageRef.current;
       const p = stage?.getPointerPosition();
@@ -451,10 +459,21 @@ export default function Board() {
     return step.elements.map((el) => ({ el, opacity: 1 }));
   }, [playback, plan.steps, step.elements, routeFn]);
 
+  /** Pieces other people are dragging right now, drawn where their pointer is. */
+  const shownFrames: Frame[] = useMemo(() => {
+    const drags = JSON.parse(peerDragKey) as { id: string; x: number; y: number }[];
+    if (!drags.length || playback) return frames;
+    const byId = new Map(drags.map((d) => [d.id, d]));
+    return frames.map((f) => {
+      const d = byId.get(f.el.id);
+      return d && 'x' in f.el ? { ...f, el: { ...f.el, x: d.x, y: d.y } as BoardEl } : f;
+    });
+  }, [frames, peerDragKey, playback]);
+
   const liveFrames: Frame[] = useMemo(() => {
-    if (!live) return frames;
-    return frames.map((f) => (f.el.id === live.id && 'x' in f.el ? { ...f, el: { ...f.el, x: live.x, y: live.y } as BoardEl } : f));
-  }, [frames, live]);
+    if (!live) return shownFrames;
+    return shownFrames.map((f) => (f.el.id === live.id && 'x' in f.el ? { ...f, el: { ...f.el, x: live.x, y: live.y } as BoardEl } : f));
+  }, [shownFrames, live]);
 
   const vision = useMemo(() => {
     const els = liveFrames.map((f) => f.el);
@@ -540,7 +559,13 @@ export default function Board() {
   }, [map]);
 
   const onChangeFor = (id: string) => (patch: Partial<BoardEl>, key?: string) => actions.updateElement(id, patch, key);
-  const onLiveFor = (id: string) => (pos: { x: number; y: number } | null) => setLive(pos ? { id, ...pos } : null);
+  const onLiveFor = (id: string) => (pos: { x: number; y: number } | null) => {
+    setLive(pos ? { id, ...pos } : null);
+    if (!liveActive) return;
+    reportDrag(pos ? { id, ...pos } : null);
+    // Konva swallows stage pointer moves while a piece is dragged.
+    if (pos) reportCursor(pos);
+  };
   const agentR = AGENT_RADIUS * settings.iconScale;
 
   const selectedEl = selectedId ? step.elements.find((el) => el.id === selectedId) : undefined;
@@ -594,6 +619,7 @@ export default function Board() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
       onContextMenu={(e) => e.preventDefault()}
+      onPointerLeave={() => liveActive && reportCursor(null)}
     >
       {size.w > 0 && (
         <Stage
@@ -784,7 +810,7 @@ export default function Board() {
                   )}
                 </Group>
               )}
-              {frames.map(({ el, opacity }) => (
+              {shownFrames.map(({ el, opacity }) => (
                 <ElementNode
                   key={el.id}
                   el={el}
@@ -828,6 +854,7 @@ export default function Board() {
                   </Group>
                 </Group>
               ))}
+              {liveActive && !playback && <PeerOverlay rot={rot} zoom={view.scale} stepIndex={stepIndex} elements={step.elements} agentR={agentR} />}
               {draft?.kind === 'pen' && (
                 <Line points={draft.points} stroke={color} strokeWidth={strokeWidth} tension={0.45} lineCap="round" lineJoin="round" dash={dashed ? [strokeWidth * 2.5, strokeWidth * 2] : undefined} listening={false} />
               )}
@@ -976,6 +1003,9 @@ export default function Board() {
         <div className="board-hint">Click to add corners · click the first corner, double-click or Enter to finish · Backspace removes the last</div>
       )}
       {playback && <div className="board-hint board-hint--live">Playing step {playback.to + 1} of {plan.steps.length}</div>}
+      {liveActive && !playback && (viewOnly || !liveReady) && (
+        <div className="board-hint board-hint--info">{liveReady ? 'View only · you can browse steps but not edit' : 'Connecting to the live session…'}</div>
+      )}
     </div>
   );
 }

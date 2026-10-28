@@ -267,6 +267,7 @@ function LibraryRow({
           <span>
             <strong>
               {p.title}
+              {p.live && <em className="library-live">Live</em>}
               {current && <em className="library-current">Open</em>}
             </strong>
             <small>

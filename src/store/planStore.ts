@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { BoardEl, PalettePayload, Plan, Side, Step, Team, Tool } from '../types';
+import type { BoardEl, LiveLink, PalettePayload, Plan, Side, Step, Team, Tool } from '../types';
 import { uid } from '../lib/ids';
 import { createFromPayload } from '../lib/elements';
 import { keepAgentsOnFloor } from '../lib/floor';
@@ -90,9 +90,25 @@ interface PlanState {
   renameFolder: (from: string, to: string) => void;
   deleteFolder: (name: string) => void;
 
+  /** A newer version of the open plan arrived from a live session; not an undoable edit. */
+  applyRemotePlan: (plan: Plan) => void;
+  setLive: (live: LiveLink | undefined) => void;
+
   setPlayback: (p: Playback | null) => void;
   showToast: (message: string) => void;
 }
+
+/**
+ * Live sessions plug in here. While one is active, edits can be refused (view-only links,
+ * still connecting), undo/redo go to the session's per-user history, and snapshot history is off
+ * because restoring a snapshot would also roll back other people's work.
+ */
+export const collabBridge = {
+  active: false,
+  blocked: (): string | null => null,
+  undo: () => {},
+  redo: () => {},
+};
 
 function blankStep(n: number): Step {
   return { id: uid(), name: `Step ${n}`, notes: '', elements: [] };
@@ -124,6 +140,7 @@ function keepMeta(target: Plan, current: Plan): Plan {
 
 let lastCommitKey: string | null = null;
 let lastCommitAt = 0;
+let lastBlockedToast = 0;
 
 export const usePlan = create<PlanState>()(
   persist(
@@ -131,6 +148,12 @@ export const usePlan = create<PlanState>()(
       /** Every plan mutation goes through here so undo/redo stays consistent. */
       const commit = (next: Plan, coalesceKey?: string, extra: Partial<PlanState> = {}) => {
         const now = Date.now();
+        const blocked = collabBridge.active ? collabBridge.blocked() : null;
+        if (blocked) {
+          if (now - lastBlockedToast > 2500) get().showToast(blocked);
+          lastBlockedToast = now;
+          return;
+        }
         const coalesce = !!coalesceKey && coalesceKey === lastCommitKey && now - lastCommitAt < 1200;
         lastCommitKey = coalesceKey ?? null;
         lastCommitAt = now;
@@ -138,7 +161,7 @@ export const usePlan = create<PlanState>()(
           const plan = { ...next, updatedAt: now };
           return {
             plan,
-            past: coalesce ? s.past : [...s.past.slice(-99), s.plan],
+            past: collabBridge.active ? [] : coalesce ? s.past : [...s.past.slice(-99), s.plan],
             future: [],
             library: upsertLibrary(s.library, plan),
             ...extra,
@@ -272,6 +295,7 @@ export const usePlan = create<PlanState>()(
         },
 
         undo: () => {
+          if (collabBridge.active) return collabBridge.undo();
           const { past, plan, future, stepIndex } = get();
           if (!past.length) return;
           const prev = keepMeta(past[past.length - 1], plan);
@@ -286,6 +310,7 @@ export const usePlan = create<PlanState>()(
           });
         },
         redo: () => {
+          if (collabBridge.active) return collabBridge.redo();
           const { past, plan, future, stepIndex } = get();
           if (!future.length) return;
           const next = keepMeta(future[0], plan);
@@ -343,6 +368,25 @@ export const usePlan = create<PlanState>()(
           const unfile = (p: Plan) => (p.folder === name ? { ...p, folder: undefined, updatedAt: Date.now() } : p);
           set({ folders: folders.filter((f) => f !== name), library: library.map(unfile), plan: unfile(plan) });
         },
+
+        applyRemotePlan: (plan) =>
+          set((s) => {
+            const stepIndex = Math.max(0, Math.min(s.stepIndex, plan.steps.length - 1));
+            const keepSelection = !!s.selectedId && !!plan.steps[stepIndex]?.elements.some((e) => e.id === s.selectedId);
+            return {
+              plan,
+              library: upsertLibrary(s.library, plan),
+              stepIndex,
+              selectedId: keepSelection ? s.selectedId : null,
+              past: [],
+              future: [],
+            };
+          }),
+        setLive: (live) =>
+          set((s) => {
+            const plan = { ...s.plan, live };
+            return { plan, library: upsertLibrary(s.library, plan) };
+          }),
 
         setPlayback: (playback) => set({ playback }),
         showToast: (message) => set({ toast: { id: Date.now(), message } }),

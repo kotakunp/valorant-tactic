@@ -1,5 +1,6 @@
 # Nixpacks build plan (used by Dokploy's "Nixpacks" build type).
-# Builds the Vite app and serves the static dist/ folder with `serve` on $PORT (default 3000).
+# Builds the Vite app; `npm start` runs server/index.mjs on $PORT (default 3000), which serves dist/
+# and hosts live sessions. Live rooms and uploaded images are written to /app/data, so mount a volume there.
 
 providers = ["node"]
 

@@ -6,6 +6,8 @@ import { planHasImages, planToShareUrl } from './share';
 import { encodeImage } from './images';
 import { uid } from './ids';
 import type { ImageEl } from '../types';
+import { dataUrlToBlob, uploadImage } from '../collab/api';
+import { liveRoomToken } from '../collab/session';
 
 /** Longest side of a freshly placed image, in board units (the map is 1000 across). */
 const IMAGE_BOARD_SIZE = 220;
@@ -16,9 +18,13 @@ export async function addImageFiles(files: File[]) {
   if (!images.length) return;
   const c = boardApi.viewCenter();
   const added: ImageEl[] = [];
+  const live = liveRoomToken();
   for (const [i, file] of images.entries()) {
     try {
-      const { src, width, height } = await encodeImage(file, 1024);
+      const encoded = await encodeImage(file, 1024);
+      const { width, height } = encoded;
+      // In a live session the image goes to the server so every sync doesn't carry it.
+      const src = live ? await uploadImage(live.room, live.token, await dataUrlToBlob(encoded.src)) : encoded.src;
       const k = IMAGE_BOARD_SIZE / Math.max(width, height);
       added.push({ id: uid(), kind: 'image', x: c.x + i * 24, y: c.y + i * 24, width: width * k, height: height * k, src });
     } catch (err) {

@@ -12,6 +12,8 @@ import Toast from './components/Toast';
 import TooltipLayer from './components/TooltipLayer';
 import ShortcutsModal from './components/ShortcutsModal';
 import LineupsPanel from './components/LineupsPanel';
+import LiveModal from './components/LiveModal';
+import { initCollab } from './collab/session';
 import { addImageFiles, copyShareLink, exportPng, startNewPlan } from './lib/actions';
 import { pickImageFiles } from './lib/images';
 import { useLineups } from './store/lineupStore';
@@ -35,7 +37,7 @@ export default function App() {
   const status = useGameData((s) => s.status);
   const error = useGameData((s) => s.error);
   const load = useGameData((s) => s.load);
-  const [modal, setModal] = useState<'maps' | 'library' | 'help' | null>(null);
+  const [modal, setModal] = useState<'maps' | 'library' | 'help' | 'live' | null>(null);
   const modalRef = useRef(modal);
   modalRef.current = modal;
   const [drawer, setDrawer] = useState<'left' | 'right' | null>(null);
@@ -55,20 +57,23 @@ export default function App() {
     const { maps, mapsById } = useGameData.getState();
     const plans = usePlan.getState();
     const shared = readSharedPlan();
+    let loaded = false;
     if (shared) {
       clearShareHash();
       if (mapsById[shared.mapId]) {
         plans.loadPlan(shared);
         plans.showToast('Shared strategy loaded');
-        return;
+        loaded = true;
+      } else {
+        plans.showToast('That share link points to a map that is no longer available');
       }
-      plans.showToast('That share link points to a map that is no longer available');
     }
     const plan = usePlan.getState().plan;
-    if (!mapsById[plan.mapId]) {
+    if (!loaded && !mapsById[plan.mapId]) {
       const fallback = maps.find((m) => m.displayName === 'Ascent') ?? maps[0];
       if (fallback) usePlan.setState({ plan: { ...plan, mapId: fallback.uuid, steps: plan.steps } });
     }
+    initCollab();
   }, [status]);
 
   useEffect(() => {
@@ -177,6 +182,7 @@ export default function App() {
         onOpenMaps={() => setModal('maps')}
         onOpenLibrary={() => setModal('library')}
         onOpenHelp={() => setModal('help')}
+        onOpenLive={() => setModal('live')}
         onToggleDrawer={(side) => setDrawer((d) => (d === side ? null : side))}
       />
       <div className="drawer-backdrop" onClick={() => setDrawer(null)} />
@@ -191,6 +197,7 @@ export default function App() {
       {modal === 'maps' && <MapPicker onClose={() => setModal(null)} />}
       {modal === 'library' && <Library onClose={() => setModal(null)} />}
       {modal === 'help' && <ShortcutsModal onClose={() => setModal(null)} />}
+      {modal === 'live' && <LiveModal onClose={() => setModal(null)} />}
       <Toast />
       <TooltipLayer />
     </div>
