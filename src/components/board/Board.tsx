@@ -503,7 +503,9 @@ export default function Board() {
     if (!raw || !stage) return;
     stage.setPointersPositions(e.nativeEvent);
     const pos = boardPos();
-    if (pos) actions.placePayload(JSON.parse(raw) as PalettePayload, pos);
+    if (!pos) return;
+    actions.setArmed(null);
+    actions.placePayload(JSON.parse(raw) as PalettePayload, pos);
   };
 
   const prevStep = stepIndex > 0 ? plan.steps[stepIndex - 1] : null;

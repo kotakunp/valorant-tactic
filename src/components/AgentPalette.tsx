@@ -12,6 +12,8 @@ function dragProps(payload: PalettePayload) {
   return {
     draggable: true,
     onDragStart: (e: React.DragEvent) => {
+      // Dragging places the piece on drop, so an earlier click-to-place must not leave another one waiting.
+      usePlan.getState().setArmed(null);
       e.dataTransfer.setData('application/x-valo', JSON.stringify(payload));
       e.dataTransfer.effectAllowed = 'copy';
     },
