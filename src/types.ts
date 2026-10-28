@@ -23,6 +23,10 @@ export interface AgentEl {
   fov?: number;
   /** Vision range in meters. */
   range?: number;
+  /** Sees over boxes and half walls (on a ledge, box or elevated spot the minimap doesn't show). */
+  highGround?: boolean;
+  /** Waypoints on the way here from this agent's spot in the previous step, in board coordinates. */
+  via?: Point[];
 }
 
 export interface AbilityEl {

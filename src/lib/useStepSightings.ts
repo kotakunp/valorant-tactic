@@ -10,11 +10,12 @@ export function useStepSightings(): Sighting[] {
   const mapId = usePlan((s) => s.plan.mapId);
   const lineOfSight = usePlan((s) => s.settings.lineOfSight);
   const showRanges = usePlan((s) => s.settings.showRanges);
+  const coverBlocks = usePlan((s) => s.settings.coverBlocksVision);
   const map = useGameData((s) => s.mapsById[mapId]);
   const occ = useOccupancy(map?.displayIcon);
   return useMemo(() => {
     const agents = step.elements.filter((e): e is AgentEl => e.kind === 'agent');
     const obstacles = showRanges ? collectObstacles(step.elements, map) : [];
-    return computeSightings(agents, occ, obstacles, map, lineOfSight);
-  }, [step.elements, occ, map, lineOfSight, showRanges]);
+    return computeSightings(agents, occ, obstacles, map, lineOfSight, coverBlocks);
+  }, [step.elements, occ, map, lineOfSight, showRanges, coverBlocks]);
 }

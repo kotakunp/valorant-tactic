@@ -1,4 +1,5 @@
-import type { BoardEl, PalettePayload, Team } from '../types';
+import type { AgentEl, BoardEl, PalettePayload, Point, Team } from '../types';
+import { pathLength, pointAlong } from './navgrid';
 import { useGameData } from '../store/gameData';
 import { DEFAULT_CONE_ANGLE, DEFAULT_RECT_WIDTH, rangePreset } from './abilityPresets';
 import { uid } from './ids';
@@ -63,8 +64,17 @@ export interface Frame {
   opacity: number;
 }
 
-/** Blends two steps: shared ids glide to their new spot, added ones fade in, removed ones fade out. */
-export function interpolateSteps(from: BoardEl[], to: BoardEl[], rawT: number): Frame[] {
+/** Walking path for an agent between its spot in two steps; null for a straight glide. */
+export type RouteFn = (from: AgentEl, to: AgentEl) => Point[] | null;
+
+/** Fraction of the move spent turning from the old facing to the direction of travel, and back at the end. */
+const TURN = 0.15;
+
+/**
+ * Blends two steps: shared ids glide to their new spot (agents along their walking route),
+ * added ones fade in, removed ones fade out.
+ */
+export function interpolateSteps(from: BoardEl[], to: BoardEl[], rawT: number, route?: RouteFn): Frame[] {
   const t = easeInOut(Math.max(0, Math.min(1, rawT)));
   const fromById = new Map(from.map((e) => [e.id, e]));
   const toIds = new Set(to.map((e) => e.id));
@@ -74,7 +84,21 @@ export function interpolateSteps(from: BoardEl[], to: BoardEl[], rawT: number): 
     if (!prev) return { el, opacity: t };
     if (prev.kind !== el.kind || !('x' in el) || !('x' in prev)) return { el, opacity: 1 };
     const moved = { ...el, x: lerp(prev.x, el.x, t), y: lerp(prev.y, el.y, t) } as BoardEl;
-    if (moved.kind === 'agent' && prev.kind === 'agent' && prev.facing !== undefined && moved.facing !== undefined) {
+    const path = moved.kind === 'agent' && prev.kind === 'agent' ? route?.(prev, moved) : null;
+    if (path && path.length >= 2 && moved.kind === 'agent' && prev.kind === 'agent') {
+      const at = pointAlong(path, pathLength(path) * t);
+      moved.x = at.x;
+      moved.y = at.y;
+      if (prev.facing !== undefined && moved.facing !== undefined) {
+        // Look where you're going while moving, then settle on the planned angle.
+        moved.facing =
+          t < TURN
+            ? lerpAngle(prev.facing, at.heading, t / TURN)
+            : t > 1 - TURN
+              ? lerpAngle(at.heading, moved.facing, (t - (1 - TURN)) / TURN)
+              : at.heading;
+      }
+    } else if (moved.kind === 'agent' && prev.kind === 'agent' && prev.facing !== undefined && moved.facing !== undefined) {
       moved.facing = lerpAngle(prev.facing, moved.facing, t);
     }
     if (moved.kind === 'ability' && prev.kind === 'ability') {

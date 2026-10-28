@@ -2075,3 +2075,37 @@ select.input {
     padding-left: 82px;
   }
 }
+
+/* ---------- Routes ---------- */
+
+.route-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.route-option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-deep);
+  text-align: left;
+}
+button.route-option:hover {
+  border-color: var(--line-strong);
+}
+.route-option strong {
+  font-family: var(--display);
+  font-size: 14px;
+  letter-spacing: 0.03em;
+}
+.route-option small {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.route-option.on {
+  border-color: var(--teal);
+  background: rgba(62, 224, 192, 0.07);
+}

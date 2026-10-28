@@ -22,6 +22,8 @@ export interface NodeProps<T extends BoardEl> {
   onChange: (patch: Partial<BoardEl>, coalesceKey?: string) => void;
   /** Reports the in-progress drag position so dependent overlays (vision) can follow live. */
   onLiveMove?: (pos: { x: number; y: number } | null) => void;
+  /** Agents: pulls a dragged position back onto walkable floor. */
+  constrain?: (pos: { x: number; y: number }) => { x: number; y: number };
 }
 
 export const AGENT_RADIUS = 15;
@@ -41,7 +43,7 @@ const setCursor = (e: Konva.KonvaEventObject<MouseEvent>, cursor: string) => {
   if (c) c.style.cursor = cursor;
 };
 
-export function AgentNode({ el, rot, scale, selected, interactive, opacity, onChange, onLiveMove }: NodeProps<AgentEl>) {
+export function AgentNode({ el, rot, scale, selected, interactive, opacity, onChange, onLiveMove, constrain }: NodeProps<AgentEl>) {
   const agent = useGameData((s) => s.agentsById[el.agentId]);
   const img = useCanvasImage(agent?.displayIconSmall);
   const r = AGENT_RADIUS * scale;
@@ -68,7 +70,9 @@ export function AgentNode({ el, rot, scale, selected, interactive, opacity, onCh
       opacity={opacity}
       draggable={interactive}
       onDragMove={(e) => {
-        if (e.target === e.currentTarget) onLiveMove?.({ x: e.target.x(), y: e.target.y() });
+        if (e.target !== e.currentTarget) return;
+        if (constrain) e.target.position(constrain(e.target.position()));
+        onLiveMove?.({ x: e.target.x(), y: e.target.y() });
       }}
       onDragEnd={(e) => {
         if (e.target !== e.currentTarget) return;

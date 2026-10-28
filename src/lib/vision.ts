@@ -4,11 +4,29 @@ import type { AgentEl, BoardEl } from '../types';
 import { BOARD, metersToBoard } from './geo';
 import { DEFAULT_FOV, DEFAULT_VISION_RANGE, normalizeAngle } from './elements';
 import { canvasUrl } from './canvasImage';
+import { buildNavGrid, masksFromRgba, type MapMasks, type NavGrid } from './navgrid';
 
-/** Walkable mask from the minimap: opaque pixels are floor, transparent pixels are walls or out of bounds. */
-export interface Occupancy {
-  size: number;
-  open: Uint8Array;
+/**
+ * Masks from the minimap: opaque pixels are floor, transparent pixels are walls or out of
+ * bounds, and light outlines inside the floor are boxes and half walls (cover).
+ */
+export type Occupancy = MapMasks;
+
+const navCache = new WeakMap<Occupancy, NavGrid>();
+
+/** Coarser walkability grid for routing and keeping agents on the floor, built on first use. */
+export function navFor(occ: Occupancy): NavGrid {
+  let nav = navCache.get(occ);
+  if (!nav) {
+    nav = buildNavGrid(occ);
+    navCache.set(occ, nav);
+  }
+  return nav;
+}
+
+/** The minimap masks if they've finished loading, without waiting. */
+export function loadedOccupancy(url: string | undefined): Occupancy | null {
+  return url ? loaded.get(url) ?? null : null;
 }
 
 export type Obstacle =
@@ -24,6 +42,8 @@ export interface Viewer {
   fov: number;
   /** Board units. */
   range: number;
+  /** False when standing on a box or marked as high ground, so cover doesn't stop sight. */
+  coverBlocks: boolean;
 }
 
 export interface Sighting {
@@ -48,10 +68,7 @@ export function loadOccupancy(url: string): Promise<Occupancy> {
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (!ctx) return reject(new Error('2D canvas unavailable'));
         ctx.drawImage(img, 0, 0, GRID, GRID);
-        const data = ctx.getImageData(0, 0, GRID, GRID).data;
-        const open = new Uint8Array(GRID * GRID);
-        for (let i = 0; i < open.length; i++) open[i] = data[i * 4 + 3] >= 128 ? 1 : 0;
-        const occ = { size: GRID, open };
+        const occ = masksFromRgba(ctx.getImageData(0, 0, GRID, GRID).data, GRID);
         loaded.set(url, occ);
         resolve(occ);
       };
@@ -123,13 +140,26 @@ function obstacleDistance(ox: number, oy: number, dx: number, dy: number, obstac
   return best;
 }
 
-/** First wall hit within maxDist when marching the minimap mask, or maxDist. */
-function marchWalls(occ: Occupancy | null, ox: number, oy: number, dx: number, dy: number, maxDist: number) {
+export function isCover(occ: Occupancy, x: number, y: number) {
+  const s = occ.size / BOARD;
+  const gx = Math.floor(x * s);
+  const gy = Math.floor(y * s);
+  if (gx < 0 || gy < 0 || gx >= occ.size || gy >= occ.size) return false;
+  return occ.cover[gy * occ.size + gx] === 1;
+}
+
+/** First wall (or, when coverBlocks, box or half wall) hit within maxDist, or maxDist. */
+function marchWalls(occ: Occupancy | null, ox: number, oy: number, dx: number, dy: number, maxDist: number, coverBlocks = false) {
   // Agents dropped off the walkable area would see nothing at all; let them see unoccluded instead.
   if (!occ || !isOpen(occ, ox, oy)) return maxDist;
   const step = (BOARD / occ.size) * 0.75;
+  // Cover right at the viewer's feet is what they're peeking over or standing beside.
+  const coverFrom = coverBlocks ? step * 4 : Infinity;
   for (let t = step; t < maxDist; t += step) {
-    if (!isOpen(occ, ox + dx * t, oy + dy * t)) return t;
+    const x = ox + dx * t;
+    const y = oy + dy * t;
+    if (!isOpen(occ, x, y)) return t;
+    if (t > coverFrom && isCover(occ, x, y)) return t;
   }
   return maxDist;
 }
@@ -145,7 +175,7 @@ export function castVision(occ: Occupancy | null, obstacles: Obstacle[], v: View
     const dx = Math.cos(a);
     const dy = Math.sin(a);
     const limit = Math.min(v.range, obstacleDistance(v.x, v.y, dx, dy, obstacles));
-    const d = marchWalls(occ, v.x, v.y, dx, dy, limit);
+    const d = marchWalls(occ, v.x, v.y, dx, dy, limit, v.coverBlocks);
     pts.push(v.x + dx * d, v.y + dy * d);
   }
   return pts;
@@ -157,7 +187,7 @@ export function castAim(occ: Occupancy | null, obstacles: Obstacle[], v: Viewer,
   const dx = Math.cos(a);
   const dy = Math.sin(a);
   const limit = Math.min(maxDist, obstacleDistance(v.x, v.y, dx, dy, obstacles));
-  const d = marchWalls(occ, v.x, v.y, dx, dy, limit);
+  const d = marchWalls(occ, v.x, v.y, dx, dy, limit, v.coverBlocks);
   return { x: v.x + dx * d, y: v.y + dy * d, blocked: d < maxDist - 1e-6 };
 }
 
@@ -171,12 +201,20 @@ export function canSee(occ: Occupancy | null, obstacles: Obstacle[], v: Viewer, 
   const dx = vx / dist;
   const dy = vy / dist;
   if (obstacleDistance(v.x, v.y, dx, dy, obstacles) < dist) return false;
-  return !useWalls || marchWalls(occ, v.x, v.y, dx, dy, dist) >= dist;
+  if (!useWalls) return true;
+  // Stop just short of the target so a box they're crouched behind counts, but not one they stand on.
+  const end = Math.max(0, dist - (BOARD / (occ?.size ?? BOARD)) * 3);
+  return marchWalls(occ, v.x, v.y, dx, dy, end, v.coverBlocks) >= end;
 }
 
-export function toViewer(el: AgentEl, map: ApiMap | undefined): Viewer | null {
+/**
+ * coverBlocks: whether boxes and half walls stop this agent's sight. An agent standing on a
+ * box, or marked as on high ground, sees over them.
+ */
+export function toViewer(el: AgentEl, map: ApiMap | undefined, occ: Occupancy | null = null, coverBlocks = false): Viewer | null {
   if (!el.vision || el.facing === undefined) return null;
   return {
+    coverBlocks: coverBlocks && !el.highGround && !(occ && isCover(occ, el.x, el.y)),
     id: el.id,
     team: el.team,
     x: el.x,
@@ -225,10 +263,11 @@ export function computeSightings(
   obstacles: Obstacle[],
   map: ApiMap | undefined,
   useWalls: boolean,
+  coverBlocks = false,
 ): Sighting[] {
   const out: Sighting[] = [];
   for (const viewerEl of agents) {
-    const v = toViewer(viewerEl, map);
+    const v = toViewer(viewerEl, map, occ, useWalls && coverBlocks);
     if (!v) continue;
     for (const target of agents) {
       if (target.team === v.team) continue;

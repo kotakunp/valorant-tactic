@@ -11,9 +11,13 @@ import { TEAM_COLORS, withAlpha } from '../../lib/colors';
 import { interpolateSteps, type Frame } from '../../lib/elements';
 import { boardApi } from '../../lib/boardApi';
 import { uid } from '../../lib/ids';
-import type { AgentEl, BoardEl, PalettePayload } from '../../types';
+import type { AgentEl, BoardEl, PalettePayload, Point } from '../../types';
 import { ElementNode, AGENT_RADIUS } from './nodes';
-import { castAim, castVision, collectObstacles, computeSightings, toViewer, useOccupancy } from '../../lib/vision';
+import { castAim, castVision, collectObstacles, computeSightings, navFor, toViewer, useOccupancy } from '../../lib/vision';
+import { previousSpot, sameVia, walkOptions, walkRoute } from '../../lib/routes';
+import { pathLength, pointAlong } from '../../lib/navgrid';
+import { snapToFloor } from '../../lib/floor';
+import type { RouteFn } from '../../lib/elements';
 import { useLineups } from '../../store/lineupStore';
 import { filterLineups } from '../../lib/lineups';
 import { addImageFiles, addLineupImages } from '../../lib/actions';
@@ -48,6 +52,8 @@ interface View {
 const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 const ROTATION_SHORTCUTS: ShortcutId[] = ['rot0', 'rot90', 'rot180', 'rot270'];
 const MIN_ZOOM = 0.3;
+
+const flat = (points: Point[]) => points.flatMap((p) => [p.x, p.y]);
 const MAX_ZOOM = 8;
 
 function findLineupId(node: Konva.Node | null, stage: Konva.Stage | null): string | null {
@@ -83,6 +89,7 @@ export default function Board() {
   const [live, setLive] = useState<{ id: string; x: number; y: number } | null>(null);
   const coneCache = useRef(new Map<string, number[]>());
   const trRef = useRef<Konva.Transformer>(null);
+  const [routeDrag, setRouteDrag] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const plan = usePlan((s) => s.plan);
   const stepIndex = usePlan((s) => s.stepIndex);
@@ -108,6 +115,9 @@ export default function Board() {
   const map = useGameData((s) => s.mapsById[plan.mapId]);
   const mapImg = useCanvasImage(map?.displayIcon);
   const occupancy = useOccupancy(map?.displayIcon);
+  const nav = useMemo(() => (occupancy ? navFor(occupancy) : null), [occupancy]);
+  const routeFn: RouteFn = useCallback((a, b) => walkRoute(nav, a, b, b.via), [nav]);
+  const constrainAgent = useCallback((p: Point) => snapToFloor(nav, p), [nav]);
   const rot = settings.rotation;
   const interactive = tool === 'select' && !playback && !armed && !spaceDown;
 
@@ -301,6 +311,7 @@ export default function Board() {
         return;
       }
     }
+    if (e.target.hasName('route-handle')) return;
     const targetId = findElementId(e.target, stage);
 
     if (armed) {
@@ -435,10 +446,10 @@ export default function Board() {
     if (playback) {
       const from = plan.steps[playback.from]?.elements ?? [];
       const to = plan.steps[playback.to]?.elements ?? [];
-      return interpolateSteps(from, to, playback.t);
+      return interpolateSteps(from, to, playback.t, routeFn);
     }
     return step.elements.map((el) => ({ el, opacity: 1 }));
-  }, [playback, plan.steps, step.elements]);
+  }, [playback, plan.steps, step.elements, routeFn]);
 
   const liveFrames: Frame[] = useMemo(() => {
     if (!live) return frames;
@@ -450,6 +461,7 @@ export default function Board() {
     const agents = els.filter((e): e is AgentEl => e.kind === 'agent');
     const obstacles = settings.showRanges ? collectObstacles(els, map) : [];
     const walls = settings.lineOfSight ? occupancy : null;
+    const coverBlocks = settings.lineOfSight && settings.coverBlocksVision;
     const opacityById = new Map(liveFrames.map((f) => [f.el.id, f.opacity]));
 
     type Aim = { x: number; y: number; blocked: boolean; facing: number };
@@ -459,9 +471,9 @@ export default function Board() {
       if (cache.size > 400) cache.clear();
       const obstacleKey = JSON.stringify(obstacles);
       for (const a of agents) {
-        const v = toViewer(a, map);
+        const v = toViewer(a, map, occupancy, coverBlocks);
         if (!v) continue;
-        const key = [v.x.toFixed(1), v.y.toFixed(1), v.facing.toFixed(1), v.fov, v.range.toFixed(1), !!walls, map?.uuid, obstacleKey].join('|');
+        const key = [v.x.toFixed(1), v.y.toFixed(1), v.facing.toFixed(1), v.fov, v.range.toFixed(1), !!walls, v.coverBlocks, map?.uuid, obstacleKey].join('|');
         let points: number[] | null = null;
         if (settings.showVision) {
           points = cache.get(key) ?? null;
@@ -477,7 +489,7 @@ export default function Board() {
     }
 
     const byId = new Map(agents.map((a) => [a.id, a]));
-    const sightings = settings.showSightLines ? computeSightings(agents, occupancy, obstacles, map, settings.lineOfSight) : [];
+    const sightings = settings.showSightLines ? computeSightings(agents, occupancy, obstacles, map, settings.lineOfSight, settings.coverBlocksVision) : [];
     const seenBy = new Map<string, string[]>();
     for (const s of sightings) seenBy.set(s.targetId, [...(seenBy.get(s.targetId) ?? []), s.viewerId]);
     const lines = sightings.flatMap((s) => {
@@ -490,22 +502,37 @@ export default function Board() {
       return target ? [{ target, count: viewers.length }] : [];
     });
     return { cones, lines, badges };
-  }, [liveFrames, settings.showRanges, settings.lineOfSight, settings.showVision, settings.showCrosshair, settings.showSightLines, occupancy, map]);
+  }, [liveFrames, settings.showRanges, settings.lineOfSight, settings.coverBlocksVision, settings.showVision, settings.showCrosshair, settings.showSightLines, occupancy, map]);
 
   const ghosts = useMemo(() => {
-    if (!settings.onionSkin || !prevStep || playback) return { elements: [] as BoardEl[], paths: [] as { id: string; from: BoardEl; to: BoardEl }[] };
+    if (!settings.onionSkin || !prevStep || playback) return { elements: [] as BoardEl[], paths: [] as { id: string; team: AgentEl['team']; points: Point[] }[] };
     const currentById = new Map(step.elements.map((el) => [el.id, el]));
-    const paths: { id: string; from: BoardEl; to: BoardEl }[] = [];
+    const paths: { id: string; team: AgentEl['team']; points: Point[] }[] = [];
     const elements: BoardEl[] = [];
     for (const el of prevStep.elements) {
       if (el.kind !== 'agent' && el.kind !== 'ability' && el.kind !== 'object') continue;
       const now = currentById.get(el.id);
       if (now && now.kind === el.kind && Math.hypot(now.x - el.x, now.y - el.y) < 4) continue;
       elements.push(el);
-      if (now && now.kind === 'agent') paths.push({ id: el.id, from: el, to: now });
+      if (now?.kind === 'agent' && el.kind === 'agent') paths.push({ id: el.id, team: now.team, points: walkRoute(nav, el, now, now.via) });
     }
     return { elements, paths };
-  }, [settings.onionSkin, prevStep, step.elements, playback]);
+  }, [settings.onionSkin, prevStep, step.elements, playback, nav]);
+
+  /** The selected agent's route from the previous step, its alternatives, and where the drag handle sits. */
+  const selectedRoute = useMemo(() => {
+    if (playback || !selectedId) return null;
+    const el = step.elements.find((e) => e.id === selectedId);
+    if (el?.kind !== 'agent') return null;
+    const prev = previousSpot(prevStep?.elements, el);
+    if (!prev) return null;
+    const dragging = routeDrag?.id === el.id ? routeDrag : null;
+    const via = dragging ? [{ x: dragging.x, y: dragging.y }] : el.via;
+    const points = walkRoute(nav, prev, el, via);
+    const options = dragging ? [] : walkOptions(nav, prev, el).filter((o) => !sameVia(o.via, el.via));
+    const handle = via?.[0] ?? pointAlong(points, pathLength(points) / 2);
+    return { el, points, options, handle };
+  }, [playback, selectedId, step.elements, prevStep, nav, routeDrag]);
 
   const callouts = useMemo(() => {
     if (!map) return [];
@@ -667,20 +694,95 @@ export default function Board() {
                   />
                 ))}
               </Group>
-              {ghosts.paths.map(({ id, from, to }) =>
-                from.kind === 'agent' && to.kind === 'agent' ? (
+              {ghosts.paths.map(({ id, team, points }) =>
+                id === selectedRoute?.el.id ? null : (
                   <Arrow
                     key={`path-${id}`}
-                    points={[from.x, from.y, to.x, to.y]}
-                    stroke={withAlpha(TEAM_COLORS[to.team], 0.75)}
-                    fill={withAlpha(TEAM_COLORS[to.team], 0.75)}
+                    points={flat(points)}
+                    stroke={withAlpha(TEAM_COLORS[team], 0.75)}
+                    fill={withAlpha(TEAM_COLORS[team], 0.75)}
                     strokeWidth={2}
                     dash={[6, 5]}
+                    lineJoin="round"
                     pointerLength={7}
                     pointerWidth={7}
                     listening={false}
                   />
-                ) : null,
+                ),
+              )}
+              {selectedRoute && (
+                <Group>
+                  {selectedRoute.options.map((o, i) => (
+                    <Line
+                      key={`alt-${i}`}
+                      points={flat(o.points)}
+                      stroke="rgba(236,232,225,0.4)"
+                      strokeWidth={2}
+                      dash={[2, 6]}
+                      lineCap="round"
+                      lineJoin="round"
+                      hitStrokeWidth={14}
+                      onMouseEnter={(e) => {
+                        const c = e.target.getStage()?.container();
+                        if (c) c.style.cursor = 'pointer';
+                        (e.target as Konva.Line).stroke('rgba(236,232,225,0.85)');
+                      }}
+                      onMouseLeave={(e) => {
+                        const c = e.target.getStage()?.container();
+                        if (c) c.style.cursor = '';
+                        (e.target as Konva.Line).stroke('rgba(236,232,225,0.4)');
+                      }}
+                      name="route-handle"
+                      listening={interactive}
+                      onClick={() => actions.updateElement(selectedRoute.el.id, { via: o.via.length ? o.via : undefined })}
+                    />
+                  ))}
+                  <Arrow
+                    points={flat(selectedRoute.points)}
+                    stroke={TEAM_COLORS[selectedRoute.el.team]}
+                    fill={TEAM_COLORS[selectedRoute.el.team]}
+                    strokeWidth={2.5}
+                    dash={[7, 5]}
+                    lineJoin="round"
+                    pointerLength={8}
+                    pointerWidth={8}
+                    shadowColor="#000"
+                    shadowBlur={3}
+                    shadowOpacity={0.8}
+                    listening={false}
+                  />
+                  {interactive && (
+                    <Circle
+                      name="route-handle selection-ui"
+                      x={selectedRoute.handle.x}
+                      y={selectedRoute.handle.y}
+                      radius={6}
+                      fill="#ece8e1"
+                      stroke={TEAM_COLORS[selectedRoute.el.team]}
+                      strokeWidth={2}
+                      draggable
+                      onMouseEnter={(e) => {
+                        const c = e.target.getStage()?.container();
+                        if (c) c.style.cursor = 'grab';
+                      }}
+                      onMouseLeave={(e) => {
+                        const c = e.target.getStage()?.container();
+                        if (c) c.style.cursor = '';
+                      }}
+                      onDragMove={(e) => {
+                        const p = constrainAgent(e.target.position());
+                        e.target.position(p);
+                        setRouteDrag((d) => (d && Math.hypot(d.x - p.x, d.y - p.y) < 3 ? d : { id: selectedRoute.el.id, ...p }));
+                      }}
+                      onDragEnd={(e) => {
+                        const p = constrainAgent(e.target.position());
+                        setRouteDrag(null);
+                        actions.updateElement(selectedRoute.el.id, { via: [p] });
+                      }}
+                      onDblClick={() => actions.updateElement(selectedRoute.el.id, { via: undefined })}
+                    />
+                  )}
+                </Group>
               )}
               {frames.map(({ el, opacity }) => (
                 <ElementNode
@@ -695,6 +797,7 @@ export default function Board() {
                   showRanges={settings.showRanges}
                   onChange={onChangeFor(el.id)}
                   onLiveMove={onLiveFor(el.id)}
+                  constrain={constrainAgent}
                 />
               ))}
               {vision.badges.map(({ target, count }) => (

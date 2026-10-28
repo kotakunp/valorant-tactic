@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { AbilitySlot, Lineup, Point, Side } from '../types';
 import { uid } from '../lib/ids';
 import { safeJSONStorage } from '../lib/safeStorage';
+import { navForMap, snapToFloor } from '../lib/floor';
 
 export interface LineupDraft {
   id?: string;
@@ -78,7 +79,9 @@ export const useLineups = create<LineupState>()(
       pickPoint: (p) => {
         const { draft, picking } = get();
         if (!draft || !picking) return;
-        const next = { ...draft, [picking]: { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 } };
+        // Utility can land on ledges and rooftops, but the thrower has to stand on the floor.
+        const at = picking === 'stand' ? snapToFloor(navForMap(draft.mapId), p) : p;
+        const next = { ...draft, [picking]: { x: Math.round(at.x * 10) / 10, y: Math.round(at.y * 10) / 10 } };
         // Placing the stand spot first is the natural order, so carry straight on to the landing spot.
         set({ draft: next, picking: picking === 'stand' && !next.land ? 'land' : null });
       },

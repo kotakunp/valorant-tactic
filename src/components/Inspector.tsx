@@ -7,6 +7,8 @@ import { OBJECTS } from '../lib/objects';
 import type { AgentEl, BoardEl, OverlayShape, Team } from '../types';
 import { DEFAULT_FOV, DEFAULT_VISION_RANGE, normalizeAngle } from '../lib/elements';
 import { useStepSightings } from '../lib/useStepSightings';
+import { navFor, useOccupancy } from '../lib/vision';
+import { previousSpot, routeCallouts, routeStats, sameVia, walkOptions, walkRoute } from '../lib/routes';
 import type { ApiAgent } from '../api/valorant';
 import { tip, tipFor } from '../lib/shortcuts';
 import { Keyboard } from 'lucide-react';
@@ -76,6 +78,9 @@ function VisionControls({ el }: { el: AgentEl }) {
     <>
       <Toggle label="Vision cone" checked={!!el.vision} onChange={(vision) => update({ vision, facing: el.facing ?? 0 })} />
       {el.vision && (
+        <Toggle label="High ground (sees over boxes)" checked={!!el.highGround} onChange={(highGround) => update({ highGround: highGround || undefined })} />
+      )}
+      {el.vision && (
         <>
           <label className="field">
             <span className="field-label">
@@ -116,6 +121,69 @@ function VisionControls({ el }: { el: AgentEl }) {
   );
 }
 
+function RouteControls({ el }: { el: AgentEl }) {
+  const a = usePlan.getState();
+  const stepIndex = usePlan((s) => s.stepIndex);
+  const prevElements = usePlan((s) => s.plan.steps[s.stepIndex - 1]?.elements);
+  const mapId = usePlan((s) => s.plan.mapId);
+  const map = useGameData((s) => s.mapsById[mapId]);
+  const occ = useOccupancy(map?.displayIcon);
+  const nav = occ ? navFor(occ) : null;
+  const prev = previousSpot(prevElements, el);
+
+  if (stepIndex === 0) return null;
+  if (!prev) {
+    return (
+      <div className="field">
+        <span className="field-label">Route</span>
+        <span className="muted small">Hasn't moved since step {stepIndex}. Drag the agent to a new spot to plan how they get there.</span>
+      </div>
+    );
+  }
+  if (!nav) return null;
+
+  const options = walkOptions(nav, prev, el);
+  const current = walkRoute(nav, prev, el, el.via);
+  const isCustom = !options.some((o) => sameVia(o.via, el.via));
+  const describe = (points: typeof current, i: number) => {
+    const via = routeCallouts(map, points);
+    return via.length ? `via ${via.slice(0, 3).join(' → ')}` : i === 0 ? 'Direct' : `Route ${i + 1}`;
+  };
+  const stats = (points: typeof current) => {
+    const s = routeStats(map, points);
+    return `${Math.round(s.meters)} m · ≈${Math.max(1, Math.round(s.seconds))} s`;
+  };
+
+  return (
+    <div className="field">
+      <span className="field-label">Route from step {stepIndex}</span>
+      <div className="route-options">
+        {options.map((o, i) => {
+          const on = sameVia(o.via, el.via);
+          return (
+            <button key={i} className={`route-option ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => a.updateElement(el.id, { via: o.via.length ? o.via : undefined })}>
+              <strong>{i === 0 ? 'Shortest' : describe(o.points, i)}</strong>
+              <small>
+                {i === 0 && describe(o.points, i) !== 'Direct' ? `${describe(o.points, i)} · ` : ''}
+                {stats(o.points)}
+              </small>
+            </button>
+          );
+        })}
+        {isCustom && (
+          <div className="route-option on">
+            <strong>Custom: {describe(current, 1)}</strong>
+            <small>{stats(current)}</small>
+          </div>
+        )}
+      </div>
+      <p className="muted small">
+        Drag the white dot on the route to send them another way, or click a faint route on the map. Times assume running with a rifle (5.4 m/s).
+      </p>
+    </div>
+  );
+}
+
 function Selection({ el }: { el: BoardEl }) {
   const agentsById = useGameData((s) => s.agentsById);
   const a = usePlan.getState();
@@ -138,6 +206,7 @@ function Selection({ el }: { el: BoardEl }) {
             </div>
           )}
           <TeamPicker team={el.team} onChange={(team) => update({ team })} />
+          <RouteControls el={el} />
           <VisionControls el={el} />
         </>
       );
@@ -398,8 +467,14 @@ export default function Inspector({ onOpenHelp }: { onOpenHelp: () => void }) {
           <Toggle label="Vision cones" checked={settings.showVision} onChange={(v) => a.setSettings({ showVision: v })} />
           <Toggle label="Crosshair lines" checked={settings.showCrosshair} onChange={(v) => a.setSettings({ showCrosshair: v })} />
           <Toggle label="Walls block vision" checked={settings.lineOfSight} onChange={(v) => a.setSettings({ lineOfSight: v })} />
+          {settings.lineOfSight && (
+            <Toggle label="Boxes & half walls block vision" checked={settings.coverBlocksVision} onChange={(v) => a.setSettings({ coverBlocksVision: v })} />
+          )}
           <Toggle label="Sight lines & crossfire" checked={settings.showSightLines} onChange={(v) => a.setSettings({ showSightLines: v })} />
-          <p className="muted small">Vision is simulated on the minimap: walls and vision-blocking utility stop sight. Boxes and height differences don't.</p>
+          <p className="muted small">
+            Vision is simulated on the minimap: walls, vision-blocking utility, and the boxes and half walls the minimap outlines stop sight. An agent
+            standing on a box, or marked as on high ground, sees over cover. Other height differences aren't modeled.
+          </p>
           <label className="field">
             <span className="field-label">
               Icon size <b>{Math.round(settings.iconScale * 100)}%</b>

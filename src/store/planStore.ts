@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { BoardEl, PalettePayload, Plan, Side, Step, Team, Tool } from '../types';
 import { uid } from '../lib/ids';
 import { createFromPayload } from '../lib/elements';
+import { keepAgentsOnFloor } from '../lib/floor';
 import { onStorageFull, safeJSONStorage } from '../lib/safeStorage';
 
 export type Rotation = 0 | 90 | 180 | 270;
@@ -17,6 +18,8 @@ export interface Settings {
   lineOfSight: boolean;
   showSightLines: boolean;
   showCrosshair: boolean;
+  /** Boxes and half walls drawn on the minimap stop sight. */
+  coverBlocksVision: boolean;
 }
 
 export interface Playback {
@@ -145,7 +148,9 @@ export const usePlan = create<PlanState>()(
 
       const mutateElements = (fn: (els: BoardEl[]) => BoardEl[], coalesceKey?: string, extra?: Partial<PlanState>) => {
         const { plan, stepIndex } = get();
-        const steps = plan.steps.map((st, i) => (i === stepIndex ? { ...st, elements: fn(st.elements) } : st));
+        const steps = plan.steps.map((st, i) =>
+          i === stepIndex ? { ...st, elements: keepAgentsOnFloor(plan.mapId, st.elements, fn(st.elements)) } : st,
+        );
         commit({ ...plan, steps }, coalesceKey, extra);
       };
 
@@ -171,6 +176,7 @@ export const usePlan = create<PlanState>()(
           lineOfSight: true,
           showSightLines: true,
           showCrosshair: true,
+          coverBlocksVision: true,
         },
         library: [],
         folders: [],
@@ -234,7 +240,13 @@ export const usePlan = create<PlanState>()(
           // Duplicated steps keep element ids so playback can tween each piece to its new spot.
           const step: Step = blank
             ? blankStep(plan.steps.length + 1)
-            : { id: uid(), name: `Step ${plan.steps.length + 1}`, notes: '', elements: current.elements.map((e) => ({ ...e })) };
+            : {
+                id: uid(),
+                name: `Step ${plan.steps.length + 1}`,
+                notes: '',
+                // A route describes how an agent got to this step, so the copy starts without one.
+                elements: current.elements.map((e) => (e.kind === 'agent' ? { ...e, via: undefined } : { ...e })),
+              };
           const steps = [...plan.steps.slice(0, stepIndex + 1), step, ...plan.steps.slice(stepIndex + 1)];
           commit({ ...plan, steps }, undefined, { stepIndex: stepIndex + 1, selectedId: null });
         },
