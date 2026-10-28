@@ -222,7 +222,13 @@ export const usePlan = create<PlanState>()(
         setArmed: (armed) => set({ armed, tool: armed ? 'select' : get().tool }),
         setFocusAgent: (focusAgentId) => set({ focusAgentId }),
         setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
-        select: (selectedId) => set({ selectedId }),
+        select: (selectedId) => {
+          const { plan, stepIndex } = get();
+          const el = selectedId ? plan.steps[stepIndex]?.elements.find((e) => e.id === selectedId) : undefined;
+          // Picking a placed agent or ability brings up that agent's abilities in the palette.
+          const focus = el?.kind === 'agent' || el?.kind === 'ability' ? { focusAgentId: el.agentId } : {};
+          set({ selectedId, ...focus });
+        },
 
         addElement: (el) => mutateElements((els) => [...els, el], undefined, { selectedId: el.id }),
         addElements: (added) => mutateElements((els) => [...els, ...added], undefined, { selectedId: added[added.length - 1]?.id ?? null }),
