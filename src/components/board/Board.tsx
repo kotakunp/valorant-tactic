@@ -309,7 +309,8 @@ export default function Board() {
     if (armed) return actions.setArmed(null);
     if (!canEdit || draftRef.current) return;
     const id = findElementId(e.target, stageRef.current);
-    if (id) removePieces([id]);
+    const el = step.elements.find((x) => x.id === id);
+    if (el?.kind === 'agent') actions.updateElement(el.id, { dead: el.dead ? undefined : true });
   };
 
   const dropTargetAt = (): DropTarget => {

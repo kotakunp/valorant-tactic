@@ -27,6 +27,8 @@ export interface AgentEl {
   highGround?: boolean;
   /** Waypoints on the way here from this agent's spot in the previous step, in board coordinates. */
   via?: Point[];
+  /** Killed: drawn crossed out, and neither sees nor gets seen. */
+  dead?: boolean;
 }
 
 export interface AbilityEl {

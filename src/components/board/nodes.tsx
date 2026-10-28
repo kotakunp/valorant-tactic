@@ -28,6 +28,12 @@ export interface NodeProps<T extends BoardEl> {
 
 export const AGENT_RADIUS = 15;
 
+/** The two strokes of the "dead" cross, in units of the token radius. */
+const CROSS = [
+  [-1, -1, 1, 1],
+  [1, -1, -1, 1],
+];
+
 type DragEvt = Konva.KonvaEventObject<DragEvent>;
 
 function moveOnDragEnd(onChange: NodeProps<BoardEl>['onChange']) {
@@ -49,7 +55,7 @@ export function AgentNode({ el, rot, scale, selected, interactive, opacity, onCh
   const r = AGENT_RADIUS * scale;
   const color = TEAM_COLORS[el.team];
   // The token counter-rotates against the board, so board-space angles shift by +rot locally.
-  const localFacing = el.facing === undefined ? null : el.facing + rot;
+  const localFacing = el.facing === undefined || el.dead ? null : el.facing + rot;
   const facingRad = localFacing === null ? 0 : (localFacing * Math.PI) / 180;
   const handleDist = r + 28;
 
@@ -93,15 +99,25 @@ export function AgentNode({ el, rot, scale, selected, interactive, opacity, onCh
           listening={false}
         />
       )}
-      <Circle radius={r + 2.5} fill={color} shadowColor="#000" shadowBlur={8} shadowOpacity={0.55} />
-      <Circle radius={r} fill={el.team === 'ally' ? '#0c2b2a' : '#2d0f15'} />
+      <Circle radius={r + 2.5} fill={el.dead ? withAlpha(color, 0.45) : color} shadowColor="#000" shadowBlur={8} shadowOpacity={0.55} />
+      <Circle radius={r} fill={el.dead ? '#1a2128' : el.team === 'ally' ? '#0c2b2a' : '#2d0f15'} />
       <Group clipFunc={(ctx) => ctx.arc(0, 0, r, 0, Math.PI * 2, false)}>
-        {img && <KImage image={img} x={-r} y={-r} width={r * 2} height={r * 2} />}
+        {img && <KImage image={img} x={-r} y={-r} width={r * 2} height={r * 2} opacity={el.dead ? 0.35 : 1} />}
       </Group>
+      {el.dead && (
+        <Group listening={false}>
+          {CROSS.map((p, i) => (
+            <Line key={`o${i}`} points={p.map((v) => v * r * 0.62)} stroke="#0f1923" strokeWidth={5.5 * scale} lineCap="round" />
+          ))}
+          {CROSS.map((p, i) => (
+            <Line key={i} points={p.map((v) => v * r * 0.62)} stroke="#ff4655" strokeWidth={3 * scale} lineCap="round" />
+          ))}
+        </Group>
+      )}
       {selected && (
         <Circle name="selection-ui" radius={r + 7} stroke="#ece8e1" strokeWidth={1.5} dash={[4, 3]} listening={false} />
       )}
-      {selected && interactive && (
+      {selected && interactive && !el.dead && (
         <>
           <Line
             name="selection-ui"

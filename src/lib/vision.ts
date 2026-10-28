@@ -212,7 +212,7 @@ export function canSee(occ: Occupancy | null, obstacles: Obstacle[], v: Viewer, 
  * box, or marked as on high ground, sees over them.
  */
 export function toViewer(el: AgentEl, map: ApiMap | undefined, occ: Occupancy | null = null, coverBlocks = false): Viewer | null {
-  if (!el.vision || el.facing === undefined) return null;
+  if (!el.vision || el.dead || el.facing === undefined) return null;
   return {
     coverBlocks: coverBlocks && !el.highGround && !(occ && isCover(occ, el.x, el.y)),
     id: el.id,
@@ -270,7 +270,7 @@ export function computeSightings(
     const v = toViewer(viewerEl, map, occ, useWalls && coverBlocks);
     if (!v) continue;
     for (const target of agents) {
-      if (target.team === v.team) continue;
+      if (target.team === v.team || target.dead) continue;
       if (canSee(useWalls ? occ : null, obstacles, v, target.x, target.y, useWalls)) {
         out.push({ viewerId: v.id, targetId: target.id });
       }

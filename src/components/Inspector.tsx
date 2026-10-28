@@ -55,7 +55,7 @@ function AgentChips({ ids, elements, agentsById }: { ids: string[]; elements: Bo
         const el = elements.find((e) => e.id === id);
         const ag = el?.kind === 'agent' ? agentsById[el.agentId] : undefined;
         return el?.kind === 'agent' && ag ? (
-          <button key={id} className="roster-icon" style={{ borderColor: TEAM_COLORS[el.team] }} {...tip(ag.displayName)} onClick={() => a.select(id)}>
+          <button key={id} className={`roster-icon ${el.dead ? 'dead' : ''}`} style={{ borderColor: TEAM_COLORS[el.team] }} {...tip(ag.displayName)} onClick={() => a.select(id)}>
             <img src={ag.displayIconSmall} alt={ag.displayName} />
           </button>
         ) : null;
@@ -207,8 +207,9 @@ function Selection({ el }: { el: BoardEl }) {
             </div>
           )}
           <TeamPicker team={el.team} onChange={(team) => update({ team })} />
+          <Toggle label="Dead" checked={!!el.dead} onChange={(dead) => update({ dead: dead || undefined })} />
           <RouteControls el={el} />
-          <VisionControls el={el} />
+          {el.dead ? <p className="muted small">Dead agents don't see anyone and can't be spotted. Right-click an agent on the map to toggle this.</p> : <VisionControls el={el} />}
         </>
       );
       break;
@@ -421,16 +422,24 @@ export default function Inspector({ onOpenHelp }: { onOpenHelp: () => void }) {
           </div>
           {(['ally', 'enemy'] as Team[]).map((team) => {
             const list = roster(team);
+            const dead = list.filter((el) => el.kind === 'agent' && el.dead).length;
             return (
               <div key={team} className="roster">
                 <span className="roster-label" style={{ color: TEAM_COLORS[team] }}>
                   {team === 'ally' ? 'Allies' : 'Enemies'} <b>{list.length}/5</b>
+                  {dead > 0 && <b className="roster-dead">{dead} dead</b>}
                 </span>
                 <div className="roster-icons">
                   {list.map((el) => {
                     const ag = el.kind === 'agent' ? agentsById[el.agentId] : undefined;
                     return ag ? (
-                      <button key={el.id} className="roster-icon" style={{ borderColor: TEAM_COLORS[team] }} {...tip(ag.displayName)} onClick={() => a.select(el.id)}>
+                      <button
+                        key={el.id}
+                        className={`roster-icon ${el.kind === 'agent' && el.dead ? 'dead' : ''}`}
+                        style={{ borderColor: TEAM_COLORS[team] }}
+                        {...tip(el.kind === 'agent' && el.dead ? `${ag.displayName} (dead)` : ag.displayName)}
+                        onClick={() => a.select(el.id)}
+                      >
                         <img src={ag.displayIconSmall} alt={ag.displayName} />
                       </button>
                     ) : null;

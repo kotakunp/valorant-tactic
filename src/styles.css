@@ -747,6 +747,26 @@ input[type='range'] {
   width: 100%;
   height: 100%;
 }
+.roster-icon.dead {
+  position: relative;
+  border-color: var(--line-strong) !important;
+}
+.roster-icon.dead img {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+.roster-icon.dead::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(45deg, transparent 46%, var(--red) 46%, var(--red) 54%, transparent 54%),
+    linear-gradient(-45deg, transparent 46%, var(--red) 46%, var(--red) 54%, transparent 54%);
+}
+.roster-label .roster-dead {
+  color: var(--red);
+  margin-left: 8px;
+}
 
 .sight-summary {
   display: flex;
